@@ -23,8 +23,8 @@ def get_db_connection(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> sqlite3.Co
 
 def init_db(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> None:
     """
-    Initializes the database schema including `stocks` and `daily_prices` tables
-    and their required indexes.
+    Initializes the database schema including `stocks`, `daily_prices`, and `index_memberships`
+    tables and their required indexes.
     """
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
@@ -61,6 +61,21 @@ def init_db(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> None:
         );
     """)
 
+    # Table: index_memberships
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS index_memberships (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            index_name TEXT NOT NULL,
+            stock_id INTEGER NOT NULL,
+            valid_from DATE NOT NULL,
+            valid_to DATE NULL,
+            created_at DATETIME,
+            updated_at DATETIME,
+            FOREIGN KEY (stock_id) REFERENCES stocks(id),
+            UNIQUE(index_name, stock_id, valid_from)
+        );
+    """)
+
     # Indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_stocks_symbol ON stocks(symbol);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_stocks_ticker ON stocks(ticker);")
@@ -68,5 +83,37 @@ def init_db(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_prices_trade_date ON daily_prices(trade_date);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_prices_stock_date ON daily_prices(stock_id, trade_date);")
 
+    # Index memberships indexes
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_index_memberships_index_name ON index_memberships(index_name);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_index_memberships_stock_id ON index_memberships(stock_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_index_memberships_valid_from ON index_memberships(valid_from);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_index_memberships_valid_to ON index_memberships(valid_to);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_index_memberships_lookup ON index_memberships(index_name, valid_from, valid_to);")
+
     conn.commit()
     conn.close()
+
+
+def is_index_member(
+    conn: sqlite3.Connection,
+    index_name: str,
+    stock_id: int,
+    trade_date: str,
+) -> bool:
+    """
+    Checks if stock_id was an active constituent of index_name on trade_date.
+    Condition: valid_from <= trade_date AND (valid_to IS NULL OR trade_date <= valid_to)
+    """
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT 1 FROM index_memberships
+        WHERE index_name = ?
+          AND stock_id = ?
+          AND valid_from <= ?
+          AND (valid_to IS NULL OR ? <= valid_to)
+        LIMIT 1;
+        """,
+        (index_name, stock_id, trade_date, trade_date),
+    )
+    return cursor.fetchone() is not None
