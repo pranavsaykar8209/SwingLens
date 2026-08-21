@@ -1,7 +1,7 @@
 # SwingLens
 
 ## Description
-SwingLens is a monorepo application structured with a React frontend, a FastAPI backend, a market-data ingestion engine for Indian equities, point-in-time index constituent tracking, a reusable technical indicator engine, an extensible strategy engine framework, and an event-driven backtesting engine.
+SwingLens is a monorepo application structured with a React frontend, a FastAPI backend, a market-data ingestion engine for Indian equities, point-in-time index constituent tracking, a reusable technical indicator engine, an extensible strategy engine framework, an event-driven backtesting engine, and real research strategies.
 
 ## Technology Stack
 - **Frontend:** React, TypeScript, Vite, Tailwind CSS, ESLint
@@ -11,81 +11,73 @@ SwingLens is a monorepo application structured with a React frontend, a FastAPI 
 
 ---
 
-## Backtesting Engine Architecture
+## Strategy: EMA Pullback v1.0
 
-The **Backtesting Engine** in `backend/backtest/` executes strategies candle-by-candle over historical price DataFrames with execution modeling, transaction costs, slippage, and performance analytics.
+The **EMA Pullback v1.0** strategy is a research strategy designed to identify high-probability long swing entries in strong bullish trends when price pulls back near the EMA20 and confirms momentum and volume expansion.
 
 ```
 backend/
-├── backtest/
-│   ├── __init__.py         # Package exports
-│   ├── models.py           # BacktestConfig, Trade, and BacktestResult models
-│   ├── costs.py            # Slippage and transaction cost calculators
-│   ├── portfolio.py        # Portfolio simulator & position sizing
-│   ├── metrics.py          # Performance metrics (Sharpe, Sortino, Drawdown, Expectancy)
-│   └── engine.py           # Event-driven BacktestEngine runner
+├── strategies/
+│   ├── ema_pullback.py         # EMA Pullback v1.0 strategy implementation
+│   ├── base.py                 # Abstract BaseStrategy interface
+│   ├── registry.py             # StrategyRegistry
+│   └── models.py               # SignalType & StrategySignal
+└── scripts/
+    └── backtest_strategy.py    # CLI runner to backtest strategies against SQLite DB
 ```
 
 ---
 
-## Key Assumptions & Rules
+## Strategy Rules & Specifications
 
-### 1. Execution Model (Next-Candle Open)
-> [!IMPORTANT]
-> Signal generated at the **CLOSE** of Candle N $\rightarrow$ Executed at the **OPEN** of Candle N+1 (plus slippage and commissions).
+### 1. Default Parameters
+- `ema_fast`: `20`
+- `ema_trend`: `50`
+- `ema_long`: `200`
+- `rsi_period`: `14`
+- `rsi_min`: `50.0`
+- `rsi_max`: `65.0`
+- `atr_period`: `14`
+- `atr_stop_multiplier`: `1.5`
+- `reward_risk_ratio`: `2.0`
+- `pullback_distance_percent`: `2.0`
+- `volume_period`: `20`
+- `volume_multiplier`: `1.0`
 
-### 2. Transaction Costs & Slippage
-- **Slippage:** Applied to execution price (`Buy = Price * (1 + Slippage)`, `Sell = Price * (1 - Slippage)`). Default `0.05%`.
-- **Commissions & Fees:** Applied to trade turnover (`Trade Value * Commission %`). Default `0.1%` per leg.
+### 2. Long Entry Setup (ALL 8 conditions required on Candle N)
+1. **Fast Trend:** `EMA20 > EMA50`
+2. **Long-term Trend:** `EMA50 > EMA200`
+3. **Price Level:** `Close > EMA200`
+4. **Pullback to EMA20:** `abs(Close - EMA20) / EMA20 <= 0.02` (within 2% of EMA20)
+5. **RSI Momentum:** `50.0 <= RSI14 <= 65.0`
+6. **Bullish Confirmation:** `Close_N > High_{N-1}` (Current candle close breaks previous candle high)
+7. **Volume Confirmation:** `Volume_N >= Volume_SMA20 * 1.0`
+8. **Data Availability:** `ATR14` and all required indicators are not `NaN`.
 
-### 3. Stop-Loss & Target Handling (Daily Candle Ambiguity Policy)
-If a daily candle's High and Low touch **both** the Stop-Loss and Target price on the same day, daily OHLC cannot determine which level was hit first.
+### 3. Stop-Loss & Target Calculations
+- **Entry Price:** Candle $N$ Close (Backtest Engine executes at Candle $N+1$ Open)
+- **Stop Loss:** $\text{Stop Loss} = \text{Entry Price} - (\text{ATR14} \times 1.5)$
+- **Target Price:** $\text{Target Price} = \text{Entry Price} + (\text{Entry Price} - \text{Stop Loss}) \times 2.0$ (2R Reward-to-Risk)
 
-The engine applies a configurable ambiguity policy:
-- `"conservative"` *(Default)*: Assumes `STOP_LOSS` was hit first and logs an ambiguity warning.
-- `"optimistic"`: Assumes `TARGET` was hit first.
-- `"skip"`: Closes at `STOP_LOSS` and logs an ambiguity warning.
-
-### 4. Strict No Look-Ahead Guarantee
-- The backtester iterates chronologically over trade dates.
-- At candle N, the strategy generates signals consuming ONLY data available through candle N (`df.iloc[:N+1]`).
-- Future candles (`N+1` onwards) are strictly hidden from signal generation logic.
-
-### 5. Win Rate vs Profitability
-> [!NOTE]
-> Win rate alone is **NOT** strategy success rate. A strategy with an 80% win rate can lose money if average losses exceed average gains. SwingLens reports comprehensive metrics including **Net Profit**, **Profit Factor**, **Expectancy**, **Max Drawdown**, **Sharpe Ratio**, and **Sortino Ratio**.
-
----
-
-## Config & Result Models
-
-### `BacktestConfig`
-- `initial_capital`: `100,000.0`
-- `position_size_type`: `"fixed"` (allocation %) or `"risk"` (portfolio risk %)
-- `position_size_value`: `0.10` (10% allocation or 1% portfolio risk)
-- `max_positions`: `5`
-- `commission_pct`: `0.001` (0.1% per leg)
-- `slippage_pct`: `0.0005` (0.05% per leg)
-- `entry_execution`: `"next_open"`
-- `ambiguity_policy`: `"conservative"`
-
-### `Trade` Model
-- `trade_id`, `symbol`, `strategy_name`, `strategy_version`
-- `entry_date`, `entry_price`, `exit_date`, `exit_price`, `quantity`
-- `stop_loss`, `target_price`, `gross_pnl`, `transaction_cost`, `slippage_cost`, `net_pnl`, `return_percent`, `holding_period`
-- `exit_reason`: `STOP_LOSS` | `TARGET` | `SIGNAL` | `END_OF_BACKTEST`
-
-### `BacktestResult` Model
-- Summary metrics: `initial_capital`, `final_capital`, `total_return_pct`, `cagr_pct`, `total_trades`, `winning_trades`, `losing_trades`, `win_rate_pct`, `profit_factor`, `max_drawdown_pct`, `expectancy`, `avg_holding_period`, `sharpe_ratio`, `sortino_ratio`
-- `trades`: List of `Trade` records
-- `equity_curve`: Daily records list (`date`, `cash`, `equity`, `drawdown`, `drawdown_percent`)
-- `warnings`: Warning strings list
+### 4. No Look-Ahead & Parameter Discipline
+- Signal evaluation uses ONLY historical data up to the current candle $N$.
+- **No Parameter Optimization:** Parameters are fixed at default research values. No curve-fitting or tuning was performed on historical datasets.
 
 ---
 
-## Commands & Testing
+## Running Strategy Backtests
 
-Run all 65 unit tests:
+### 1. Single Stock Backtest (e.g. ABB)
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.scripts.backtest_strategy --strategy ema_pullback --symbol ABB
+```
+
+### 2. Full Nifty Next 50 Universe Backtest
+```bash
+PYTHONPATH=. backend/.venv/bin/python -m backend.scripts.backtest_strategy --strategy ema_pullback --universe nifty_next_50
+```
+
+### 3. Run All Unit Tests
 ```bash
 PYTHONPATH=. backend/.venv/bin/python -m pytest backend/tests
 ```
