@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ScanSignalType(str, Enum):
@@ -36,14 +36,25 @@ class ScanResult(BaseModel):
 class ScanSummary(BaseModel):
     """
     Structured summary of a complete universe scan run.
+    Uses populate_by_name=True to support both stocks_scanned/scanned_count and skip_count/error_count.
     """
+    model_config = ConfigDict(populate_by_name=True)
+
     scan_date: str
     universe: str
     strategy: str
     strategy_version: str
-    scanned_count: int
-    buy_count: int
-    watch_count: int
-    hold_count: int
-    error_count: int
+    stocks_scanned: int = Field(validation_alias="scanned_count", default=0)
+    buy_count: int = 0
+    watch_count: int = 0
+    hold_count: int = 0
+    skip_count: int = Field(validation_alias="error_count", default=0)
     results: List[ScanResult] = Field(default_factory=list)
+
+    @property
+    def scanned_count(self) -> int:
+        return self.stocks_scanned
+
+    @property
+    def error_count(self) -> int:
+        return self.skip_count

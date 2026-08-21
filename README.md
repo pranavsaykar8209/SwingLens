@@ -101,3 +101,57 @@ The **Daily Market Scanner** (`backend/scanner/`) is a backend service designed 
   PYTHONPATH=. backend/.venv/bin/python -m backend.scripts.run_scanner
   ```
 
+---
+
+## FastAPI Backend Endpoints
+
+### 1. Health Check
+`GET /health`
+- **Response:** `{"status": "ok"}`
+
+### 2. Latest Scanner Results
+`GET /api/scanner/latest`
+- **Description:** Returns daily market scan results across the active index universe for the requested strategy.
+- **Query Parameters:**
+  - `strategy` (optional, default: `ema_pullback`): Strategy identifier string registered in `StrategyRegistry`. Returns `HTTP 400` if unknown.
+  - `index` (optional, default: `NIFTY_NEXT_50`): Target index universe name in `index_memberships`.
+- **CORS Configuration:** Configured for local development origins (`http://localhost:5173`, `http://127.0.0.1:5173`, `http://localhost:3000`).
+
+#### Example JSON Response:
+```json
+{
+  "scan_date": "2026-08-20",
+  "universe": "NIFTY_NEXT_50",
+  "strategy": "EMA Pullback",
+  "strategy_version": "1.0",
+  "stocks_scanned": 50,
+  "buy_count": 2,
+  "watch_count": 0,
+  "hold_count": 47,
+  "skip_count": 1,
+  "results": [
+    {
+      "symbol": "HINDZINC",
+      "company_name": "Hindustan Zinc Ltd.",
+      "signal": "BUY",
+      "signal_date": "2026-08-20",
+      "close": 573.9,
+      "entry_price": 573.9,
+      "stop_loss": 550.27,
+      "target_price": 621.16,
+      "risk_reward": 2.0,
+      "score": 0.85,
+      "strategy_name": "EMA Pullback",
+      "strategy_version": "1.0",
+      "reason": "EMA20 (568.10) > EMA50 (550.20) > EMA200 (510.40)...",
+      "metadata": {
+        "rsi14": 58.4
+      },
+      "error": null,
+      "status": "SUCCESS"
+    }
+  ]
+}
+```
+
+
