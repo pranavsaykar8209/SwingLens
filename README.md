@@ -81,3 +81,23 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.scripts.backtest_strategy --str
 ```bash
 PYTHONPATH=. backend/.venv/bin/python -m pytest backend/tests
 ```
+
+---
+
+## Daily Market Scanner
+
+The **Daily Market Scanner** (`backend/scanner/`) is a backend service designed to identify stocks matching strategy setup conditions on the latest completed daily candle.
+
+### Key Characteristics:
+- **Purpose:** Answers *"Which current Nifty Next 50 stocks satisfy EMA Pullback v1.0 on the latest completed daily candle?"*
+- **Dynamic Universe:** Loads active constituents of `NIFTY_NEXT_50` directly from SQLite `index_memberships` (point-in-time membership tracking).
+- **Strategy Used:** `EMA Pullback v1.0` via the standard `BaseStrategy` interface.
+- **Offline Operation:** Operates 100% offline using existing local daily price history stored in `data/swinglens.db`. Does not download market data or modify database tables.
+- **Strict No-Lookahead Rule:** Evaluates signals using only completed daily candles available at or before the scan date.
+- **Error Isolation:** If price data for an individual stock is incomplete (< 200 candles), the scanner returns an `ERROR` `ScanResult` for that stock without halting the overall scan loop.
+- **Structured Data Models:** Returns `ScanResult` and `ScanSummary` Pydantic models designed for direct JSON serialization through FastAPI endpoints and UI consumption by the React frontend.
+- **Development CLI:** A developer CLI tool is available for terminal testing:
+  ```bash
+  PYTHONPATH=. backend/.venv/bin/python -m backend.scripts.run_scanner
+  ```
+
