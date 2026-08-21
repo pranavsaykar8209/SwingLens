@@ -17,9 +17,11 @@ venv/
 env/
 
 # Data & Databases
+*.csv
 data/*.db
 data/*.sqlite
 data/*.sqlite3
+
 
 # Environment & IDE
 .env
