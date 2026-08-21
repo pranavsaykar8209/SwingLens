@@ -1,34 +1,89 @@
 # SwingLens
 
 ## Description
-SwingLens is a monorepo application structured with a React frontend, a FastAPI backend, a market-data ingestion engine for Indian equities, and point-in-time index constituent tracking.
+SwingLens is a monorepo application structured with a React frontend, a FastAPI backend, a market-data ingestion engine for Indian equities, point-in-time index constituent tracking, and a reusable technical indicator engine.
 
 ## Technology Stack
 - **Frontend:** React, TypeScript, Vite, Tailwind CSS, ESLint
 - **Backend:** Python 3.12+, FastAPI, Uvicorn, Pydantic
-- **Market Data & Storage:** SQLite, yfinance, pandas, httpx
+- **Market Data & Storage:** SQLite, yfinance, pandas, numpy, httpx
 - **Testing:** Pytest
 
 ---
 
-## Market Data & Index Membership Architecture
+## Technical Indicator Engine Architecture
 
-SwingLens decouples price history ingestion from index constituent membership tracking to support accurate point-in-time querying.
+The **Technical Indicator Engine** operates as a pure, in-memory analytical layer decoupled from database storage and strategy execution.
 
 ```
 backend/
-├── database/
-│   └── connection.py       # SQLite connection manager, schema & is_index_member helper
-├── market_data/
-│   ├── universe.py         # Nifty Next 50 constituent loader (NSE URL + fallback)
-│   ├── downloader.py       # yfinance daily historical fetcher & concurrent downloader
-│   ├── membership.py       # Point-in-time index membership update manager
-│   └── validator.py        # OHLCV data validation (NaN checks, High/Low relationship)
-└── scripts/
-    ├── initialize_data.py   # Full 5-year historical daily price initialization CLI
-    ├── update_market_data.py# Incremental daily price update CLI
-    ├── update_index_membership.py # CLI command to update index membership tracking
-    └── data_quality_report.py  # Read-only database quality audit CLI
+├── indicators/
+│   ├── __init__.py         # Package exports
+│   ├── ema.py              # EMA & SMA calculations for arbitrary periods
+│   ├── rsi.py              # Wilder-style RSI calculation
+│   ├── atr.py              # True Range (TR) & Wilder-style smoothed ATR
+│   ├── volume.py           # Volume SMA & Relative Volume (RVOL)
+│   ├── price_action.py     # % Change, distance from EMA, rolling High/Low, crossovers
+│   └── engine.py           # Price history loader & analytical calculate_indicators() API
+```
+
+### Clean Raw Data Guarantee
+- The SQLite table `daily_prices` contains **ONLY** raw OHLCV market data (`open`, `high`, `low`, `close`, `adjusted_close`, `volume`).
+- Calculated indicator columns (e.g. `ema_20`, `rsi_14`) exist **strictly in-memory** during DataFrame analysis and are **never** written back into SQLite.
+
+### Strict No Look-Ahead Guarantee
+- Indicators consume ONLY data available on or before the current candle.
+- Mathematical transformations rely strictly on historical windowing (`rolling`, `ewm`, `shift`), preventing future price leakage in backtests.
+
+### Warm-Up Period Rules
+- Indicators require a sufficient historical candle warm-up period (e.g., `EMA 200` requires at least 200 prior observations, `RSI 14` requires 14 prior observations).
+- Warm-up periods return `NaN` (unrounded `float64`) and are **never** silently replaced with zero.
+
+---
+
+## Supported Technical Indicators & Primitives
+
+| Indicator / Primitive | Module | Function / Key Syntax | Description |
+| :--- | :--- | :--- | :--- |
+| **EMA** | `ema.py` | `calculate_ema(series, period)` / `"ema_<period>"` | Exponential Moving Average (supports arbitrary periods) |
+| **SMA** | `ema.py` | `calculate_sma(series, period)` / `"sma_<period>"` | Simple Moving Average (supports arbitrary periods) |
+| **RSI** | `rsi.py` | `calculate_rsi(series, period=14)` / `"rsi_14"` | Wilder-style Relative Strength Index |
+| **TR & ATR** | `atr.py` | `calculate_atr(high, low, close, period=14)` / `"atr_14"` | True Range & Wilder-style smoothed Average True Range |
+| **Volume SMA** | `volume.py` | `calculate_volume_sma(volume, period=20)` / `"volume_sma_20"` | Volume moving average |
+| **Relative Volume** | `volume.py` | `calculate_relative_volume(volume, period=20)` / `"relative_volume_20"` | Current Volume / Volume SMA |
+| **Distance from EMA** | `price_action.py` | `distance_from_ema_pct(close, ema)` / `"dist_ema_<period>_pct"` | % distance of close price from EMA |
+| **% Change** | `price_action.py` | `percentage_change(series, periods=1)` / `"pct_change_<periods>"` | Multi-period percentage change |
+| **Rolling High/Low** | `price_action.py` | `highest_high`, `lowest_low` / `"highest_high_<period>"` | Rolling highest high & lowest low |
+| **Crossovers** | `price_action.py` | `crossed_above(series_a, series_b)`, `crossed_below` | Returns `True` **only** on the exact candle of crossing |
+
+---
+
+## Example Usage
+
+### 1. High-Level Indicator Engine API
+```python
+from backend.database.connection import get_db_connection
+from backend.indicators import get_price_history, calculate_indicators
+
+conn = get_db_connection()
+
+# Fetch raw OHLCV DataFrame for a stock
+df = get_price_history(conn, symbol="COALINDIA")
+
+# Compute analytical indicators in-memory
+df_analyzed = calculate_indicators(
+    df,
+    indicators=[
+        "ema_20",
+        "ema_50",
+        "ema_200",
+        "rsi_14",
+        "atr_14",
+        "volume_sma_20",
+        "relative_volume_20",
+        "dist_ema_20_pct",
+    ]
+)
 ```
 
 ---
@@ -37,69 +92,8 @@ backend/
 
 - **Database Path:** `data/swinglens.db` *(Excluded from Git repository)*
 
-### Table: `stocks`
-Stores equity metadata and active status.
-- `id` (INTEGER PRIMARY KEY AUTOINCREMENT)
-- `symbol` (TEXT NOT NULL UNIQUE)
-- `ticker` (TEXT NOT NULL UNIQUE)
-- `company_name` (TEXT)
-- `exchange` (TEXT)
-- `series` (TEXT)
-- `is_active` (INTEGER NOT NULL DEFAULT 1)
-- `created_at` (DATETIME)
-- `updated_at` (DATETIME)
-
-### Table: `daily_prices`
-Stores historical daily OHLCV candlestick records.
-- `stock_id` (INTEGER NOT NULL, FK -> `stocks.id`)
-- `trade_date` (DATE NOT NULL)
-- `open` (REAL), `high` (REAL), `low` (REAL), `close` (REAL), `adjusted_close` (REAL), `volume` (INTEGER)
-- `created_at` (DATETIME)
-- **PRIMARY KEY:** `(stock_id, trade_date)`
-
-### Table: `index_memberships`
-Stores point-in-time index constituent membership validity windows.
-- `id` (INTEGER PRIMARY KEY AUTOINCREMENT)
-- `index_name` (TEXT NOT NULL) - e.g. `NIFTY_NEXT_50`
-- `stock_id` (INTEGER NOT NULL, FK -> `stocks.id`)
-- `valid_from` (DATE NOT NULL) - Start date of membership window
-- `valid_to` (DATE NULL) - End date of membership window (`NULL` if currently active)
-- `created_at` (DATETIME)
-- `updated_at` (DATETIME)
-- **UNIQUE:** `(index_name, stock_id, valid_from)`
-
-### Indexes
-- `idx_stocks_symbol` ON `stocks(symbol)`
-- `idx_stocks_ticker` ON `stocks(ticker)`
-- `idx_daily_prices_stock_id` ON `daily_prices(stock_id)`
-- `idx_daily_prices_trade_date` ON `daily_prices(trade_date)`
-- `idx_daily_prices_stock_date` ON `daily_prices(stock_id, trade_date)`
-- `idx_index_memberships_index_name` ON `index_memberships(index_name)`
-- `idx_index_memberships_stock_id` ON `index_memberships(stock_id)`
-- `idx_index_memberships_valid_from` ON `index_memberships(valid_from)`
-- `idx_index_memberships_valid_to` ON `index_memberships(valid_to)`
-- `idx_index_memberships_lookup` ON `index_memberships(index_name, valid_from, valid_to)`
-
----
-
-## Index Membership & Point-in-Time Querying
-
-### Why Index Membership is Stored Separately
-Applying today's Nifty Next 50 constituent list retrospectively to 5-year historical price data introduces severe **survivorship bias**. Stocks that performed poorly or were demoted in past years would be omitted from historical backtests, skewing strategy performance.
-
-By storing membership ranges in `index_memberships` with `valid_from` and `valid_to` dates:
-1. Current constituents are recorded starting from today's date (`valid_to = NULL`).
-2. We do not invent historical membership dates for newly added constituents.
-3. Historical constituent change logs will be populated prior to backtesting to enable realistic point-in-time backtesting.
-
-### Querying Membership Status
-Use the database helper function `is_index_member`:
-```python
-from backend.database.connection import get_db_connection, is_index_member
-
-conn = get_db_connection()
-is_active = is_index_member(conn, index_name="NIFTY_NEXT_50", stock_id=1, trade_date="2024-05-20")
-```
+### Tables: `stocks`, `daily_prices`, `index_memberships`
+*(See earlier schema documentation; `daily_prices` remains strictly raw OHLCV data).*
 
 ---
 
@@ -114,31 +108,12 @@ pip install -r requirements.txt
 cd ..
 ```
 
-### 2. Initialize Market Prices (5-Year Historical Download)
+### 2. Initialize Market Data
 ```bash
 PYTHONPATH=. backend/.venv/bin/python -m backend.scripts.initialize_data
 ```
 
-### 3. Update Index Membership Records
+### 3. Run All Tests
 ```bash
-PYTHONPATH=. backend/.venv/bin/python -m backend.scripts.update_index_membership
-```
-
-### 4. Run Incremental Daily Price Update
-```bash
-PYTHONPATH=. backend/.venv/bin/python -m backend.scripts.update_market_data
-```
-
-### 5. Run Data Quality Audit
-```bash
-PYTHONPATH=. backend/.venv/bin/python -m backend.scripts.data_quality_report
-```
-
----
-
-## Development & Testing
-
-Run all unit tests:
-```bash
-PYTHONPATH=. backend/.venv/bin/pytest backend/tests
+PYTHONPATH=. backend/.venv/bin/python -m pytest backend/tests
 ```
