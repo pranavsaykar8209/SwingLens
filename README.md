@@ -1,7 +1,7 @@
 # SwingLens
 
 ## Description
-SwingLens is a monorepo application structured with a React frontend, a FastAPI backend, a market-data ingestion engine for Indian equities, point-in-time index constituent tracking, a reusable technical indicator engine, and an extensible strategy engine framework.
+SwingLens is a monorepo application structured with a React frontend, a FastAPI backend, a market-data ingestion engine for Indian equities, point-in-time index constituent tracking, a reusable technical indicator engine, an extensible strategy engine framework, and an event-driven backtesting engine.
 
 ## Technology Stack
 - **Frontend:** React, TypeScript, Vite, Tailwind CSS, ESLint
@@ -11,87 +11,81 @@ SwingLens is a monorepo application structured with a React frontend, a FastAPI 
 
 ---
 
-## Strategy Engine Framework Architecture
+## Backtesting Engine Architecture
 
-The **Strategy Engine Framework** provides a decoupled, strongly typed abstraction for swing trading strategies. It isolates signal generation logic from database storage, UI rendering, and backtester execution.
+The **Backtesting Engine** in `backend/backtest/` executes strategies candle-by-candle over historical price DataFrames with execution modeling, transaction costs, slippage, and performance analytics.
 
 ```
 backend/
-├── strategies/
+├── backtest/
 │   ├── __init__.py         # Package exports
-│   ├── models.py           # SignalType Enum & StrategySignal Pydantic model
-│   ├── base.py             # Abstract BaseStrategy class & metadata definitions
-│   ├── registry.py         # StrategyRegistry for discovery & lookup
-│   └── examples/
-│       ├── __init__.py
-│       └── example_strategy.py # Non-trading PassthroughHoldStrategy demonstrator
+│   ├── models.py           # BacktestConfig, Trade, and BacktestResult models
+│   ├── costs.py            # Slippage and transaction cost calculators
+│   ├── portfolio.py        # Portfolio simulator & position sizing
+│   ├── metrics.py          # Performance metrics (Sharpe, Sortino, Drawdown, Expectancy)
+│   └── engine.py           # Event-driven BacktestEngine runner
 ```
 
-### Signal Model (`StrategySignal`)
-Signals emitted by strategies follow a strict Pydantic model:
-- `symbol`: Equity symbol (e.g. `COALINDIA`)
-- `strategy_name`: Name of strategy (e.g. `Passthrough Hold Strategy`)
-- `strategy_version`: Version string (e.g. `1.0.0`)
-- `signal`: `BUY` | `SELL` | `HOLD` | `WATCH`
-- `signal_date`: Date string `YYYY-MM-DD`
-- `entry_price`: Optional entry price float
-- `stop_loss`: Optional stop loss float
-- `target_price`: Optional target price float
-- `risk_reward`: Automatically calculated `(target - entry) / (entry - stop)` ratio
-- `score`: Confidence score (e.g. 0.0 - 1.0)
-- `reason`: Explanation string
-- `metadata`: Arbitrary strategy metadata dict
+---
 
-### Strict No Look-Ahead Rule
-- Strategies receive historical price and indicator DataFrames sorted chronologically (`trade_date ASC`).
-- Evaluated candle `i` consumes **ONLY** rows `df.iloc[:i+1]`.
-- Future candles (`i+1` onwards) are strictly hidden from signal calculation logic.
+## Key Assumptions & Rules
 
-### Strategy Parameters & Registry
-- Strategies define configurable parameters in `default_parameters` (e.g. `{"ema_fast": 20, "ema_slow": 50}`).
-- New strategies register with the central registry via `@register_strategy`:
-  ```python
-  from backend.strategies import BaseStrategy, register_strategy, SignalType, StrategySignal
+### 1. Execution Model (Next-Candle Open)
+> [!IMPORTANT]
+> Signal generated at the **CLOSE** of Candle N $\rightarrow$ Executed at the **OPEN** of Candle N+1 (plus slippage and commissions).
 
-  @register_strategy
-  class MyStrategy(BaseStrategy):
-      name = "My Strategy"
-      version = "1.0.0"
-      default_parameters = {"rsi_period": 14}
+### 2. Transaction Costs & Slippage
+- **Slippage:** Applied to execution price (`Buy = Price * (1 + Slippage)`, `Sell = Price * (1 - Slippage)`). Default `0.05%`.
+- **Commissions & Fees:** Applied to trade turnover (`Trade Value * Commission %`). Default `0.1%` per leg.
 
-      def generate_signals(self, df):
-          ...
-  ```
-- Strategies are instantiated by name via `get_strategy("My Strategy", parameters={...})`.
-- Registry listing via `list_strategies()` returns metadata for all available strategies.
+### 3. Stop-Loss & Target Handling (Daily Candle Ambiguity Policy)
+If a daily candle's High and Low touch **both** the Stop-Loss and Target price on the same day, daily OHLC cannot determine which level was hit first.
+
+The engine applies a configurable ambiguity policy:
+- `"conservative"` *(Default)*: Assumes `STOP_LOSS` was hit first and logs an ambiguity warning.
+- `"optimistic"`: Assumes `TARGET` was hit first.
+- `"skip"`: Closes at `STOP_LOSS` and logs an ambiguity warning.
+
+### 4. Strict No Look-Ahead Guarantee
+- The backtester iterates chronologically over trade dates.
+- At candle N, the strategy generates signals consuming ONLY data available through candle N (`df.iloc[:N+1]`).
+- Future candles (`N+1` onwards) are strictly hidden from signal generation logic.
+
+### 5. Win Rate vs Profitability
+> [!NOTE]
+> Win rate alone is **NOT** strategy success rate. A strategy with an 80% win rate can lose money if average losses exceed average gains. SwingLens reports comprehensive metrics including **Net Profit**, **Profit Factor**, **Expectancy**, **Max Drawdown**, **Sharpe Ratio**, and **Sortino Ratio**.
 
 ---
 
-## Strategy Framework vs Backtesting & Scanner
+## Config & Result Models
 
-| Layer | Responsibility |
-| :--- | :--- |
-| **Indicator Engine** | Computes in-memory technical indicators (EMA, RSI, ATR, RVOL) from raw OHLCV prices. |
-| **Strategy Engine** | Consumes OHLCV + indicators and emits structured `StrategySignal` objects (`BUY`, `SELL`, `HOLD`, `WATCH`). Does not handle trade execution. |
-| **Scanner Engine (Future)** | Iterates universe, runs active strategies on latest candle (`generate_latest_signal`), filters high-confidence setups for UI display. |
-| **Backtesting Engine (Future)** | Feeds historical data candle-by-candle into strategies, simulates orders, tracks slippage/fees, and calculates portfolio metrics (Sharpe, drawdown, win rate). |
+### `BacktestConfig`
+- `initial_capital`: `100,000.0`
+- `position_size_type`: `"fixed"` (allocation %) or `"risk"` (portfolio risk %)
+- `position_size_value`: `0.10` (10% allocation or 1% portfolio risk)
+- `max_positions`: `5`
+- `commission_pct`: `0.001` (0.1% per leg)
+- `slippage_pct`: `0.0005` (0.05% per leg)
+- `entry_execution`: `"next_open"`
+- `ambiguity_policy`: `"conservative"`
+
+### `Trade` Model
+- `trade_id`, `symbol`, `strategy_name`, `strategy_version`
+- `entry_date`, `entry_price`, `exit_date`, `exit_price`, `quantity`
+- `stop_loss`, `target_price`, `gross_pnl`, `transaction_cost`, `slippage_cost`, `net_pnl`, `return_percent`, `holding_period`
+- `exit_reason`: `STOP_LOSS` | `TARGET` | `SIGNAL` | `END_OF_BACKTEST`
+
+### `BacktestResult` Model
+- Summary metrics: `initial_capital`, `final_capital`, `total_return_pct`, `cagr_pct`, `total_trades`, `winning_trades`, `losing_trades`, `win_rate_pct`, `profit_factor`, `max_drawdown_pct`, `expectancy`, `avg_holding_period`, `sharpe_ratio`, `sortino_ratio`
+- `trades`: List of `Trade` records
+- `equity_curve`: Daily records list (`date`, `cash`, `equity`, `drawdown`, `drawdown_percent`)
+- `warnings`: Warning strings list
 
 ---
 
-## Commands for Local Setup & Testing
+## Commands & Testing
 
-### 1. Run Unit Tests
+Run all 65 unit tests:
 ```bash
 PYTHONPATH=. backend/.venv/bin/python -m pytest backend/tests
-```
-
-### 2. Register & Inspect Available Strategies
-```python
-from backend.strategies import list_strategies, get_strategy
-
-# List metadata for all registered strategies
-all_strategies = list_strategies()
-
-# Instantiate strategy with custom parameters
-strategy = get_strategy("Passthrough Hold Strategy", parameters={"holding_note": "Custom note"})
 ```
