@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Data & Databases
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# Environment & IDE
+.env
+.env.local
+.env.*.local
+.DS_Store
+.vscode/
+.idea/
