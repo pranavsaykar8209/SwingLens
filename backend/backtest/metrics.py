@@ -12,15 +12,19 @@ def calculate_performance_metrics(
     equity_curve: List[Dict[str, Any]],
     start_date: str,
     end_date: str,
+    open_trades: int = 0,
 ) -> Dict[str, Any]:
     """
-    Computes statistical and portfolio performance metrics for a backtest run.
+    Computes statistical and portfolio performance metrics for a single-stock backtest run.
     """
     total_trades = len(closed_trades)
-    winning_trades = sum(1 for t in closed_trades if t.net_pnl > 0)
-    losing_trades = sum(1 for t in closed_trades if t.net_pnl < 0)
+    winning_trades = [t for t in closed_trades if (t.pnl_points > 0 or t.net_pnl > 0)]
+    losing_trades = [t for t in closed_trades if (t.pnl_points < 0 or t.net_pnl < 0)]
 
-    win_rate_pct = (winning_trades / total_trades * 100.0) if total_trades > 0 else 0.0
+    win_count = len(winning_trades)
+    loss_count = len(losing_trades)
+
+    win_rate_pct = (win_count / total_trades * 100.0) if total_trades > 0 else 0.0
 
     total_return_dollar = final_capital - initial_capital
     total_return_pct = (total_return_dollar / initial_capital * 100.0) if initial_capital > 0 else 0.0
@@ -36,31 +40,49 @@ def calculate_performance_metrics(
     except Exception:
         cagr_pct = 0.0
 
-    # Trade PnL metrics
-    wins = [t.net_pnl for t in closed_trades if t.net_pnl > 0]
-    losses = [abs(t.net_pnl) for t in closed_trades if t.net_pnl < 0]
+    # Trade PnL & percentage metrics
+    win_pcts = [t.pnl_percent for t in winning_trades]
+    loss_pcts = [t.pnl_percent for t in losing_trades]
+    all_pcts = [t.pnl_percent for t in closed_trades]
 
-    gross_profit = sum(wins)
-    gross_loss = sum(losses)
+    avg_win_pct = (sum(win_pcts) / win_count) if win_count > 0 else 0.0
+    avg_loss_pct = (sum(loss_pcts) / loss_count) if loss_count > 0 else 0.0
+    avg_trade_pct = (sum(all_pcts) / total_trades) if total_trades > 0 else 0.0
+
+    wins = [t.net_pnl for t in winning_trades]
+    losses = [abs(t.net_pnl) for t in losing_trades]
+
+    gross_profit = sum(wins) if wins else sum(t.pnl_points for t in winning_trades if t.pnl_points > 0)
+    gross_loss = sum(losses) if losses else sum(abs(t.pnl_points) for t in losing_trades if t.pnl_points < 0)
 
     if gross_loss > 0:
         profit_factor = round(gross_profit / gross_loss, 2)
     elif gross_profit > 0:
-        profit_factor = 999.0  # Infinite profit factor
+        profit_factor = 999.0
     else:
         profit_factor = 0.0
 
-    avg_win = (gross_profit / len(wins)) if wins else 0.0
-    avg_loss = (gross_loss / len(losses)) if losses else 0.0
+    avg_win = (gross_profit / win_count) if win_count > 0 else 0.0
+    avg_loss = (gross_loss / loss_count) if loss_count > 0 else 0.0
     avg_trade = (total_return_dollar / total_trades) if total_trades > 0 else 0.0
 
     win_ratio = win_rate_pct / 100.0
     loss_ratio = 1.0 - win_ratio
     expectancy = (win_ratio * avg_win) - (loss_ratio * avg_loss)
 
-    avg_holding_period = (
-        sum(t.holding_period for t in closed_trades) / total_trades if total_trades > 0 else 0.0
-    )
+    holding_days_list = [t.holding_days if t.holding_days > 0 else t.holding_period for t in closed_trades]
+    avg_holding_days = (sum(holding_days_list) / total_trades) if total_trades > 0 else 0.0
+    max_holding_days = max(holding_days_list) if holding_days_list else 0
+
+    # R-multiple metrics
+    r_multiples = [t.r_multiple for t in closed_trades if t.r_multiple is not None]
+    winning_r_list = [t.r_multiple for t in winning_trades if t.r_multiple is not None]
+    losing_r_list = [t.r_multiple for t in losing_trades if t.r_multiple is not None]
+
+    total_r = sum(r_multiples) if r_multiples else 0.0
+    winning_r = sum(winning_r_list) if winning_r_list else 0.0
+    losing_r = sum(losing_r_list) if losing_r_list else 0.0
+    avg_r = (total_r / len(r_multiples)) if r_multiples else 0.0
 
     # Max Drawdown from equity curve
     max_drawdown = 0.0
@@ -78,7 +100,6 @@ def calculate_performance_metrics(
         std_returns = np.std(returns)
 
         if std_returns > 1e-6:
-            # Annualized Sharpe (assuming 252 trading days, 0 risk-free rate)
             sharpe_ratio = round(float((np.mean(returns) / std_returns) * np.sqrt(252)), 2)
 
         downside_returns = returns[returns < 0]
@@ -93,9 +114,14 @@ def calculate_performance_metrics(
         "total_return_pct": round(total_return_pct, 2),
         "cagr_pct": round(cagr_pct, 2),
         "total_trades": total_trades,
-        "winning_trades": winning_trades,
-        "losing_trades": losing_trades,
+        "winning_trades": win_count,
+        "losing_trades": loss_count,
+        "open_trades": open_trades,
+        "win_rate": round(win_rate_pct, 2),
         "win_rate_pct": round(win_rate_pct, 2),
+        "average_win_percent": round(avg_win_pct, 2),
+        "average_loss_percent": round(avg_loss_pct, 2),
+        "average_trade_percent": round(avg_trade_pct, 2),
         "gross_profit": round(gross_profit, 2),
         "gross_loss": round(gross_loss, 2),
         "net_profit": round(total_return_dollar, 2),
@@ -106,7 +132,15 @@ def calculate_performance_metrics(
         "expectancy": round(expectancy, 2),
         "max_drawdown": round(max_drawdown, 2),
         "max_drawdown_pct": round(max_drawdown_pct, 2),
-        "avg_holding_period": round(avg_holding_period, 1),
+        "max_drawdown_percent": round(max_drawdown_pct, 2),
+        "avg_holding_period": round(avg_holding_days, 1),
+        "average_holding_days": round(avg_holding_days, 1),
+        "maximum_holding_days": int(max_holding_days),
+        "average_r_multiple": round(avg_r, 2),
+        "total_r": round(total_r, 2),
+        "winning_r": round(winning_r, 2),
+        "losing_r": round(losing_r, 2),
         "sharpe_ratio": sharpe_ratio,
         "sortino_ratio": sortino_ratio,
     }
+

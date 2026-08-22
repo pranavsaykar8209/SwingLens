@@ -2,8 +2,11 @@ import logging
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.backtest import BacktestEngine, BacktestResult
+from backend.database.connection import get_db_connection
+from backend.indicators.engine import get_price_history
 from backend.scanner import MarketScanner, ScanSummary
-from backend.strategies.registry import _GLOBAL_REGISTRY
+from backend.strategies.registry import _GLOBAL_REGISTRY, get_strategy, list_strategies
 
 logger = logging.getLogger(__name__)
 
@@ -65,3 +68,52 @@ def get_latest_scan(
             status_code=500,
             detail="Failed to execute daily market scan due to internal server or database error.",
         )
+
+
+@app.get("/api/backtest/{symbol}", response_model=BacktestResult)
+def backtest_single_stock(
+    symbol: str,
+    strategy: str = Query(default="ema_pullback", description="Strategy identifier string"),
+    start_date: str = Query(default=None, description="Optional start date (YYYY-MM-DD)"),
+    end_date: str = Query(default=None, description="Optional end date (YYYY-MM-DD)"),
+):
+    """
+    Executes an on-demand single-stock backtest for the specified symbol.
+    Queries ONLY that stock's price history from SQLite and runs historical simulation.
+    """
+    symbol_clean = symbol.strip().upper()
+    try:
+        strat_obj = get_strategy(strategy)
+    except KeyError:
+        registered = [s["name"] for s in list_strategies()]
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown strategy '{strategy}'. Registered strategies: {registered}",
+        )
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM stocks WHERE symbol = ?", (symbol_clean,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Stock symbol '{symbol_clean}' not found in database.",
+            )
+
+        df = get_price_history(conn, symbol_clean, start_date=start_date, end_date=end_date)
+    finally:
+        conn.close()
+
+    if df.empty:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No price history found for symbol '{symbol_clean}' in database.",
+        )
+
+    df["symbol"] = symbol_clean
+    engine = BacktestEngine(strategy=strat_obj)
+    result = engine.run(df)
+    return result
+

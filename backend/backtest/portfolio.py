@@ -20,6 +20,7 @@ class Position:
         target_price: Optional[float] = None,
         entry_cost: float = 0.0,
         entry_slippage: float = 0.0,
+        signal_date: str = "",
     ):
         self.position_id = str(uuid.uuid4())[:8]
         self.symbol = symbol
@@ -32,6 +33,7 @@ class Position:
         self.target_price = target_price
         self.entry_cost = entry_cost
         self.entry_slippage = entry_slippage
+        self.signal_date = signal_date or entry_date
 
 
 class Portfolio:
@@ -110,6 +112,7 @@ class Portfolio:
         quantity: int,
         stop_loss: Optional[float] = None,
         target_price: Optional[float] = None,
+        signal_date: str = "",
     ) -> Optional[Position]:
         """
         Executes buy entry order, applies slippage & transaction costs, and records position.
@@ -147,6 +150,7 @@ class Portfolio:
             target_price=target_price,
             entry_cost=trans_cost,
             entry_slippage=slippage_cost,
+            signal_date=signal_date or entry_date,
         )
         self.open_positions[symbol] = pos
         return pos
@@ -179,28 +183,43 @@ class Portfolio:
         gross_pnl = (exec_price - pos.entry_price) * pos.quantity
         net_pnl = gross_pnl - total_trans_cost
 
+        pnl_points = round(exec_price - pos.entry_price, 2)
+        pnl_percent = round(((exec_price - pos.entry_price) / pos.entry_price) * 100.0, 2)
+
+        r_mult = None
+        if pos.stop_loss is not None and abs(pos.entry_price - pos.stop_loss) > 1e-4:
+            r_mult = round((exec_price - pos.entry_price) / abs(pos.entry_price - pos.stop_loss), 2)
+
         cost_basis = (pos.entry_price * pos.quantity) + pos.entry_cost
         return_pct = (net_pnl / cost_basis * 100.0) if cost_basis > 0 else 0.0
+
+        h_days = max(1, holding_period)
 
         trade = Trade(
             trade_id=pos.position_id,
             symbol=symbol,
             strategy_name=pos.strategy_name,
             strategy_version=pos.strategy_version,
+            signal_date=pos.signal_date,
             entry_date=pos.entry_date,
-            entry_price=pos.entry_price,
+            entry_price=round(pos.entry_price, 2),
             exit_date=exit_date,
-            exit_price=exec_price,
+            exit_price=round(exec_price, 2),
             quantity=pos.quantity,
-            stop_loss=pos.stop_loss,
-            target_price=pos.target_price,
+            stop_loss=round(pos.stop_loss, 2) if pos.stop_loss else None,
+            target_price=round(pos.target_price, 2) if pos.target_price else None,
             gross_pnl=round(gross_pnl, 2),
             transaction_cost=round(total_trans_cost, 2),
             slippage_cost=round(total_slippage_cost, 2),
             net_pnl=round(net_pnl, 2),
+            pnl_points=pnl_points,
+            pnl_percent=pnl_percent,
             return_percent=round(return_pct, 2),
-            holding_period=max(1, holding_period),
+            r_multiple=r_mult,
+            holding_period=h_days,
+            holding_days=h_days,
             exit_reason=exit_reason,
+            status="CLOSED",
         )
         self.closed_trades.append(trade)
         return trade

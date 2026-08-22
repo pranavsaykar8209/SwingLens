@@ -154,4 +154,24 @@ The **Daily Market Scanner** (`backend/scanner/`) is a backend service designed 
 }
 ```
 
+### 3. Single-Stock Backtest
+`GET /api/backtest/{symbol}`
+- **Description:** Executes an on-demand single-stock strategy backtest querying daily price history strictly for `{symbol}`.
+- **Query Parameters:**
+  - `strategy` (optional, default: `ema_pullback`): Strategy identifier string.
+  - `start_date` (optional, YYYY-MM-DD): Start date threshold.
+  - `end_date` (optional, YYYY-MM-DD): End date threshold.
+
+---
+
+## How to Run the Application
+
+Run both the FastAPI backend and Vite React frontend with a single command from the project root:
+
+```bash
+npm run dev
+```
+
+- **Backend API:** `http://localhost:8000` (API Docs: `http://localhost:8000/docs`)
+- **Frontend Dashboard:** `http://localhost:5173`
 

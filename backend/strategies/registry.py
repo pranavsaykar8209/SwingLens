@@ -5,9 +5,16 @@ from .base import BaseStrategy
 logger = logging.getLogger(__name__)
 
 
+import re
+
+
 def _normalize_name(name: str) -> str:
-    """Normalizes strategy name key to lowercase stripped string."""
-    return name.lower().strip().replace(" ", "_")
+    """Normalizes strategy name key to lowercase stripped string without version suffixes."""
+    clean = name.lower().strip()
+    clean = re.sub(r"\s+v\d+(\.\d+)*$", "", clean)
+    clean = clean.replace(" ", "_")
+    return clean
+
 
 
 class StrategyRegistry:

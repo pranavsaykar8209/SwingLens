@@ -32,6 +32,53 @@ export interface ScanSummary {
   results: ScanResult[];
 }
 
+export interface BacktestTrade {
+  trade_id?: string;
+  symbol: string;
+  strategy_name: string;
+  strategy_version: string;
+  signal_date: string;
+  entry_date: string;
+  entry_price: number;
+  stop_loss?: number | null;
+  target_price?: number | null;
+  exit_date: string;
+  exit_price: number;
+  exit_reason: string;
+  pnl_points: number;
+  pnl_percent: number;
+  r_multiple?: number | null;
+  holding_days: number;
+  status: string;
+}
+
+export interface SingleStockBacktestResult {
+  symbol: string;
+  strategy_name: string;
+  strategy_version: string;
+  start_date: string;
+  end_date: string;
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  open_trades: number;
+  win_rate: number;
+  average_win_percent: number;
+  average_loss_percent: number;
+  average_trade_percent: number;
+  profit_factor: number;
+  max_drawdown_percent: number;
+  average_holding_days: number;
+  maximum_holding_days: number;
+  average_r_multiple: number;
+  total_r: number;
+  winning_r: number;
+  losing_r: number;
+  ambiguity_policy_note?: string;
+  trades: BacktestTrade[];
+  warnings?: string[];
+}
+
 /**
  * Fetches the latest daily market scan results from FastAPI backend.
  */
@@ -55,3 +102,31 @@ export async function fetchLatestScan(
   const data: ScanSummary = await response.json();
   return data;
 }
+
+/**
+ * Fetches on-demand single-stock backtest results from FastAPI backend.
+ */
+export async function fetchSingleStockBacktest(
+  symbol: string,
+  strategy: string = 'ema_pullback',
+  startDate?: string,
+  endDate?: string
+): Promise<SingleStockBacktestResult> {
+  let url = `/api/backtest/${encodeURIComponent(symbol)}?strategy=${encodeURIComponent(strategy)}`;
+  if (startDate) url += `&start_date=${encodeURIComponent(startDate)}`;
+  if (endDate) url += `&end_date=${encodeURIComponent(endDate)}`;
+
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Backtest API returned HTTP ${response.status}`);
+  }
+
+  return await response.json();
+}
+

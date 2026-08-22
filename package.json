@@ -1,0 +1,10 @@
+{
+  "name": "swinglens-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "PYTHONPATH=. backend/.venv/bin/uvicorn backend.app.main:app --reload --port 8000 & npm --prefix frontend run dev",
+    "start": "npm run dev",
+    "test": "PYTHONPATH=. backend/.venv/bin/pytest backend/tests && npm --prefix frontend test"
+  }
+}

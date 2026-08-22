@@ -41,7 +41,10 @@ class BacktestEngine:
             universe_label = sym
         else:
             data_dict = {k: v.copy() for k, v in price_data.items()}
-            universe_label = f"Multi-Stock Universe ({len(data_dict)} stocks)"
+            if len(data_dict) == 1:
+                universe_label = list(data_dict.keys())[0]
+            else:
+                universe_label = f"Multi-Stock Universe ({len(data_dict)} stocks)"
 
         if not data_dict:
             warnings.append("Empty price data provided.")
@@ -117,6 +120,7 @@ class BacktestEngine:
                                 quantity=qty,
                                 stop_loss=sig.stop_loss,
                                 target_price=sig.target_price,
+                                signal_date=sig.signal_date,
                             )
                     elif sig.signal == SignalType.SELL and sym in portfolio.open_positions:
                         pos = portfolio.open_positions[sym]
@@ -222,7 +226,7 @@ class BacktestEngine:
                 symbol=sym,
                 exit_date=final_date,
                 raw_price=close_price,
-                exit_reason=ExitReason.END_OF_BACKTEST.value,
+                exit_reason=ExitReason.END_OF_DATA.value,
                 holding_period=holding_period,
             )
 
@@ -242,9 +246,12 @@ class BacktestEngine:
             equity_curve=portfolio.equity_curve,
             start_date=start_date,
             end_date=end_date,
+            open_trades=len(portfolio.open_positions),
         )
 
         return BacktestResult(
+            symbol=universe_label,
+            strategy=self.strategy.name,
             strategy_name=self.strategy.name,
             strategy_version=self.strategy.version,
             symbol_or_universe=universe_label,
@@ -257,12 +264,24 @@ class BacktestEngine:
             total_trades=metrics["total_trades"],
             winning_trades=metrics["winning_trades"],
             losing_trades=metrics["losing_trades"],
+            open_trades=metrics["open_trades"],
+            win_rate=metrics["win_rate"],
             win_rate_pct=metrics["win_rate_pct"],
+            average_win_percent=metrics["average_win_percent"],
+            average_loss_percent=metrics["average_loss_percent"],
+            average_trade_percent=metrics["average_trade_percent"],
             profit_factor=metrics["profit_factor"],
             max_drawdown=metrics["max_drawdown"],
             max_drawdown_pct=metrics["max_drawdown_pct"],
+            max_drawdown_percent=metrics["max_drawdown_percent"],
             expectancy=metrics["expectancy"],
             avg_holding_period=metrics["avg_holding_period"],
+            average_holding_days=metrics["average_holding_days"],
+            maximum_holding_days=metrics["maximum_holding_days"],
+            average_r_multiple=metrics["average_r_multiple"],
+            total_r=metrics["total_r"],
+            winning_r=metrics["winning_r"],
+            losing_r=metrics["losing_r"],
             sharpe_ratio=metrics["sharpe_ratio"],
             sortino_ratio=metrics["sortino_ratio"],
             trades=portfolio.closed_trades,
@@ -272,6 +291,8 @@ class BacktestEngine:
 
     def _empty_result(self, label: str, warnings: List[str]) -> BacktestResult:
         return BacktestResult(
+            symbol=label,
+            strategy=self.strategy.name,
             strategy_name=self.strategy.name,
             strategy_version=self.strategy.version,
             symbol_or_universe=label,
@@ -284,11 +305,23 @@ class BacktestEngine:
             total_trades=0,
             winning_trades=0,
             losing_trades=0,
+            open_trades=0,
+            win_rate=0.0,
             win_rate_pct=0.0,
+            average_win_percent=0.0,
+            average_loss_percent=0.0,
+            average_trade_percent=0.0,
             profit_factor=0.0,
             max_drawdown=0.0,
             max_drawdown_pct=0.0,
+            max_drawdown_percent=0.0,
             expectancy=0.0,
             avg_holding_period=0.0,
+            average_holding_days=0.0,
+            maximum_holding_days=0,
+            average_r_multiple=0.0,
+            total_r=0.0,
+            winning_r=0.0,
+            losing_r=0.0,
             warnings=warnings,
         )
