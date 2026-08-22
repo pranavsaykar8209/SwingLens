@@ -8,6 +8,7 @@ import {
   type SingleStockBacktestResult,
 } from '../api/scanner';
 import { useSafeNavigate } from '../utils/navigation';
+import { Header } from './Header';
 import { StockPriceChart } from './StockPriceChart';
 import { StrengthBadge } from './StrengthBadge';
 
@@ -100,6 +101,8 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
     aggregatedResult?.best_strategy_name ||
     'Multi-Strategy';
 
+  const hasActionableBuy = scoreVal > 0 && entryPrice !== null && entryPrice !== undefined;
+
   const handleRunBacktest = async () => {
     setLoadingBacktest(true);
     setBacktestError(null);
@@ -123,11 +126,10 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
     }
   };
 
-  // Convert stock to format expected by StockPriceChart
   const chartStockProp: ScanResult = {
     symbol: currentSymbol,
     company_name: stock.company_name,
-    signal: (stock.signal as any) || (scoreVal > 0 ? 'BUY' : 'HOLD'),
+    signal: (stock.signal as any) || (hasActionableBuy ? 'BUY' : 'HOLD'),
     signal_date: stock.signal_date || aggregatedResult?.signal_date,
     entry_price: entryPrice,
     stop_loss: stopLoss,
@@ -139,29 +141,35 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
     status: 'SUCCESS',
   };
 
+  const signalDate = stock.signal_date || aggregatedResult?.signal_date || undefined;
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased pb-16">
-      {/* Top Navigation Bar */}
-      <div className="bg-slate-900/90 border-b border-slate-800/80 backdrop-blur-xl sticky top-0 z-40 w-full px-6 sm:px-10 py-4 shadow-xl">
-        <div className="w-full flex items-center justify-between">
+      {/* 1. Global Consistent Header */}
+      <Header scanDate={signalDate} onRefresh={() => {}} isRefreshing={false} />
+
+      {/* Main Container */}
+      <main className="w-full px-6 sm:px-10 pb-12 space-y-6">
+        {/* Page-Specific Action Bar */}
+        <div className="flex items-center justify-between">
           <button
             onClick={handleBackClick}
-            className="group flex items-center gap-2.5 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/90 hover:bg-slate-800 px-4 py-2.5 rounded-xl border border-slate-700/70 transition-all cursor-pointer shadow-sm"
+            className="group flex items-center gap-2 text-xs font-semibold text-slate-300 hover:text-white bg-slate-900 hover:bg-slate-800 px-3.5 py-2 rounded-xl border border-slate-800 transition-all cursor-pointer shadow-sm"
           >
             <svg className="w-4 h-4 transition-transform group-hover:-translate-x-1 text-slate-400 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
-            Back to Scanner Dashboard
+            ← Back to Recommendations
           </button>
 
           <button
             onClick={handleRunBacktest}
             disabled={loadingBacktest}
-            className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-50 text-white font-semibold text-xs px-5 py-2.5 rounded-xl border border-indigo-400/30 transition-all cursor-pointer flex items-center gap-2.5 shadow-lg shadow-indigo-600/25"
+            className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold text-xs px-4 py-2 rounded-xl border border-indigo-400/30 transition-all cursor-pointer flex items-center gap-2 shadow-md shadow-indigo-950"
           >
             {loadingBacktest ? (
               <>
-                <svg className="animate-spin -ml-1 mr-1 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
@@ -169,7 +177,7 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
               </>
             ) : (
               <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
                 Backtest Historical Performance
@@ -177,92 +185,95 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
             )}
           </button>
         </div>
-      </div>
 
-      {/* Main Stock Detail Container */}
-      <main className="w-full px-6 sm:px-10 py-8 space-y-8">
-        {/* Title Banner Header */}
-        <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xl">
+        {/* Stock Title Banner Header */}
+        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xl">
           <div>
-            <div className="flex items-center gap-3.5">
-              <h1 className="text-3xl sm:text-4xl font-extrabold text-white font-mono tracking-tight">
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-white font-mono tracking-tight">
                 {currentSymbol}
               </h1>
-              <StrengthBadge strength={strengthVal} size="md" />
-              <span className="text-xs px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 font-mono font-bold">
-                Score: {scoreVal}/{aggregatedResult?.strategies_evaluated || 5}
+              <span
+                className={`text-[11px] px-2.5 py-0.5 rounded-md font-mono font-bold uppercase border ${
+                  hasActionableBuy
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                }`}
+              >
+                {hasActionableBuy ? 'ACTIONABLE BUY' : 'NO ACTION'}
               </span>
+              <StrengthBadge strength={strengthVal} size="sm" />
             </div>
-            <p className="text-sm sm:text-base text-slate-300 font-medium mt-1.5">
+            <p className="text-xs sm:text-sm text-slate-300 font-medium mt-1">
               {stock.company_name || currentSymbol}
             </p>
           </div>
 
-          <div className="text-xs text-slate-400 font-mono bg-slate-800/60 border border-slate-700/60 rounded-xl px-5 py-3 flex items-center gap-6 shadow-inner">
+          <div className="text-xs text-slate-400 font-mono bg-slate-800/60 border border-slate-700/60 rounded-xl px-4 py-2.5 flex items-center gap-5 shadow-inner">
             <div>
               <span className="text-slate-500 block text-[10px] tracking-wider uppercase font-semibold">SIGNAL DATE</span>
-              <span className="text-slate-100 font-bold text-sm">{stock.signal_date || aggregatedResult?.signal_date || 'Latest'}</span>
+              <span className="text-slate-100 font-bold">{signalDate || 'Latest'}</span>
             </div>
-            <div className="h-7 w-px bg-slate-700/60" />
+            <div className="h-6 w-px bg-slate-700/60" />
             <div>
-              <span className="text-slate-500 block text-[10px] tracking-wider uppercase font-semibold">STRATEGY ALIGNMENT</span>
-              <span className="text-emerald-400 font-bold text-sm">{aggregatedResult?.buy_count || 0}/5 BUYs</span>
+              <span className="text-slate-500 block text-[10px] tracking-wider uppercase font-semibold">STRATEGY AGREEMENT</span>
+              <span className={scoreVal > 0 ? 'text-emerald-400 font-bold' : 'text-slate-400 font-bold'}>
+                {scoreVal}/5 BUYs
+              </span>
             </div>
           </div>
         </div>
 
-        {/* 1. Trade Execution Parameters */}
-        <section className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 sm:p-8 shadow-xl">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4 font-mono">
+        {/* 2. Trade Execution Parameters (Only show prominent parameters when actionable) */}
+        <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-3">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono">
             Trade Execution Parameters
           </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4 sm:p-5 shadow-sm">
-              <span className="text-xs text-slate-400 block mb-1 font-medium">Entry Price</span>
-              <span className="text-2xl font-extrabold font-mono text-emerald-400">
-                {entryPrice !== null && entryPrice !== undefined ? `₹${entryPrice.toFixed(2)}` : '-'}
-              </span>
+
+          {hasActionableBuy ? (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5 sm:p-4 shadow-sm">
+                <span className="text-xs text-slate-400 block mb-0.5 font-medium">Entry Price</span>
+                <span className="text-xl sm:text-2xl font-extrabold font-mono text-emerald-400">
+                  ₹{entryPrice!.toFixed(2)}
+                </span>
+              </div>
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5 sm:p-4 shadow-sm">
+                <span className="text-xs text-slate-400 block mb-0.5 font-medium">Stop Loss</span>
+                <span className="text-xl sm:text-2xl font-extrabold font-mono text-rose-400">
+                  {stopLoss ? `₹${stopLoss.toFixed(2)}` : '-'}
+                </span>
+              </div>
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5 sm:p-4 shadow-sm">
+                <span className="text-xs text-slate-400 block mb-0.5 font-medium">Target Price</span>
+                <span className="text-xl sm:text-2xl font-extrabold font-mono text-teal-300">
+                  {targetPrice ? `₹${targetPrice.toFixed(2)}` : '-'}
+                </span>
+              </div>
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5 sm:p-4 shadow-sm">
+                <span className="text-xs text-slate-400 block mb-0.5 font-medium">Risk : Reward</span>
+                <span className="text-xl sm:text-2xl font-extrabold font-mono text-amber-300">
+                  {riskReward ? `${riskReward}:1` : '-'}
+                </span>
+              </div>
             </div>
-            <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4 sm:p-5 shadow-sm">
-              <span className="text-xs text-slate-400 block mb-1 font-medium">Stop Loss</span>
-              <span className="text-2xl font-extrabold font-mono text-rose-400">
-                {stopLoss !== null && stopLoss !== undefined ? `₹${stopLoss.toFixed(2)}` : '-'}
-              </span>
+          ) : (
+            <div className="bg-slate-950/40 border border-slate-800/60 rounded-xl p-4 text-xs font-mono text-slate-400 space-y-1">
+              <span className="font-semibold text-slate-300 block">No actionable setup today.</span>
+              <p>
+                Overall strategy agreement is {scoreVal}/5. All quantitative strategies currently recommend HOLD for this stock.
+              </p>
             </div>
-            <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4 sm:p-5 shadow-sm">
-              <span className="text-xs text-slate-400 block mb-1 font-medium">Target Price</span>
-              <span className="text-2xl font-extrabold font-mono text-teal-300">
-                {targetPrice !== null && targetPrice !== undefined ? `₹${targetPrice.toFixed(2)}` : '-'}
-              </span>
-            </div>
-            <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4 sm:p-5 shadow-sm">
-              <span className="text-xs text-slate-400 block mb-1 font-medium">Risk : Reward</span>
-              <span className="text-2xl font-extrabold font-mono text-amber-300">
-                {riskReward !== null && riskReward !== undefined ? `${riskReward}:1` : '-'}
-              </span>
-            </div>
-          </div>
+          )}
         </section>
 
-        {/* 2. Full-Width Historical Price Chart */}
-        <section className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 sm:p-8 shadow-xl">
+        {/* 3. Full-Width Historical Price Chart */}
+        <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl">
           <StockPriceChart stock={chartStockProp} backtestTrades={backtestResult?.trades || []} />
         </section>
 
-        {/* 3. Strategy Setup Breakdown */}
-        {stock.reason && (
-          <section className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 sm:p-8 shadow-xl">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 font-mono">
-              Strategy Setup Breakdown
-            </h2>
-            <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-5 text-xs sm:text-sm text-slate-200 leading-relaxed font-mono">
-              {stock.reason}
-            </div>
-          </section>
-        )}
-
         {/* 4. Multi-Strategy Individual Votes (5 Strategies) */}
-        <section className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 sm:p-8 shadow-xl space-y-4">
+        <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-3">
           <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
             <div>
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono">
@@ -288,25 +299,32 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
               <table className="w-full text-left border-collapse text-xs font-mono">
                 <thead>
                   <tr className="bg-slate-800/50 border-b border-slate-700/60 text-slate-400 uppercase tracking-wider text-[11px]">
-                    <th className="py-3 px-4">Strategy</th>
-                    <th className="py-3 px-3 text-center">Signal</th>
-                    <th className="py-3 px-3 text-right">Entry</th>
-                    <th className="py-3 px-3 text-right">Stop Loss</th>
-                    <th className="py-3 px-3 text-right">Target</th>
-                    <th className="py-3 px-3 text-center">R:R</th>
-                    <th className="py-3 px-4">Setup Reasoning</th>
+                    <th className="py-2.5 px-4">Strategy</th>
+                    <th className="py-2.5 px-3 text-center">Vote</th>
+                    <th className="py-2.5 px-3 text-right">Entry</th>
+                    <th className="py-2.5 px-3 text-right">Stop Loss</th>
+                    <th className="py-2.5 px-3 text-right">Target</th>
+                    <th className="py-2.5 px-3 text-center">R:R</th>
+                    <th className="py-2.5 px-4">Setup Reasoning</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50 text-slate-200">
                   {aggregatedResult.votes.map((vote) => {
                     const isVoteBuy = vote.signal === 'BUY';
                     return (
-                      <tr key={vote.strategy_name} className="hover:bg-slate-800/30 transition-colors">
-                        <td className="py-3 px-4">
-                          <span className="font-extrabold text-slate-100">{vote.strategy_name}</span>
+                      <tr
+                        key={vote.strategy_name}
+                        className={`transition-colors ${
+                          isVoteBuy ? 'bg-emerald-950/15 hover:bg-emerald-950/25' : 'hover:bg-slate-800/30'
+                        }`}
+                      >
+                        <td className="py-2.5 px-4">
+                          <span className={`font-extrabold ${isVoteBuy ? 'text-emerald-300' : 'text-slate-200'}`}>
+                            {vote.strategy_name}
+                          </span>
                           <span className="text-[10px] text-slate-500 ml-1.5">v{vote.strategy_version}</span>
                         </td>
-                        <td className="py-3 px-3 text-center">
+                        <td className="py-2.5 px-3 text-center">
                           <span
                             className={`text-[10px] px-2.5 py-0.5 rounded font-extrabold border ${
                               isVoteBuy
@@ -314,22 +332,22 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
                                 : 'bg-slate-800 text-slate-400 border-slate-700'
                             }`}
                           >
-                            {vote.signal}
+                            {isVoteBuy ? 'BUY ✓' : 'HOLD'}
                           </span>
                         </td>
-                        <td className="py-3 px-3 text-right font-medium">
+                        <td className="py-2.5 px-3 text-right font-medium">
                           {vote.entry_price ? `₹${vote.entry_price.toFixed(2)}` : '-'}
                         </td>
-                        <td className="py-3 px-3 text-right font-medium">
+                        <td className="py-2.5 px-3 text-right font-medium">
                           {vote.stop_loss ? `₹${vote.stop_loss.toFixed(2)}` : '-'}
                         </td>
-                        <td className="py-3 px-3 text-right font-medium">
+                        <td className="py-2.5 px-3 text-right font-medium">
                           {vote.target_price ? `₹${vote.target_price.toFixed(2)}` : '-'}
                         </td>
-                        <td className="py-3 px-3 text-center">
-                          {vote.risk_reward ? `${vote.risk_reward.toFixed(1)}:1` : '-'}
+                        <td className="py-2.5 px-3 text-center">
+                          {vote.risk_reward ? `${vote.risk_reward}:1` : '-'}
                         </td>
-                        <td className="py-3 px-4 text-slate-300 text-[11px] font-sans">
+                        <td className="py-2.5 px-4 text-slate-300 text-[11px] font-sans">
                           {vote.reason || vote.error || 'No setup breakdown specified.'}
                         </td>
                       </tr>
@@ -343,13 +361,13 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
 
         {/* 5. Calculated Indicators */}
         {stock.metadata && Object.keys(stock.metadata).length > 0 && (
-          <section className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 sm:p-8 shadow-xl">
+          <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 font-mono">
               Calculated Technical Indicators
             </h2>
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 text-xs">
               {Object.entries(stock.metadata).map(([key, val]) => (
-                <div key={key} className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-3.5 flex justify-between items-center">
+                <div key={key} className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-3 flex justify-between items-center">
                   <span className="text-slate-400 font-mono">{key}</span>
                   <span className="font-bold text-slate-100 font-mono text-sm">{String(val)}</span>
                 </div>
@@ -367,11 +385,11 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
         )}
 
         {backtestResult && (
-          <section className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 sm:p-8 space-y-6 animate-fade-in shadow-xl">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-800/50 border border-slate-700/60 rounded-xl p-5">
+          <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-5 animate-fade-in shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-800/50 border border-slate-700/60 rounded-xl p-4">
               <div>
                 <div className="flex items-center gap-3">
-                  <h3 className="text-lg font-bold text-white font-mono">
+                  <h3 className="text-base font-bold text-white font-mono">
                     {backtestResult.symbol} Historical Backtest Performance
                   </h3>
                   <span className="text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2.5 py-0.5 rounded-md">
@@ -388,48 +406,48 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
             </div>
 
             {/* Performance Metrics Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3.5 text-xs">
-              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 text-xs">
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5">
                 <span className="text-slate-400 block text-[11px] font-medium">Total Trades</span>
-                <span className="text-xl font-bold font-mono text-white">{backtestResult.total_trades}</span>
+                <span className="text-lg font-bold font-mono text-white">{backtestResult.total_trades}</span>
               </div>
-              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4">
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5">
                 <span className="text-slate-400 block text-[11px] font-medium">Winning / Losing</span>
-                <span className="text-xl font-bold font-mono text-emerald-400">
+                <span className="text-lg font-bold font-mono text-emerald-400">
                   {backtestResult.winning_trades} <span className="text-slate-500">/</span> <span className="text-rose-400">{backtestResult.losing_trades}</span>
                 </span>
               </div>
-              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4">
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5">
                 <span className="text-slate-400 block text-[11px] font-medium">Win Rate</span>
-                <span className="text-xl font-bold font-mono text-indigo-300">{backtestResult.win_rate.toFixed(1)}%</span>
+                <span className="text-lg font-bold font-mono text-indigo-300">{backtestResult.win_rate.toFixed(1)}%</span>
               </div>
-              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4">
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5">
                 <span className="text-slate-400 block text-[11px] font-medium">Profit Factor</span>
-                <span className="text-xl font-bold font-mono text-amber-300">{backtestResult.profit_factor.toFixed(2)}</span>
+                <span className="text-lg font-bold font-mono text-amber-300">{backtestResult.profit_factor.toFixed(2)}</span>
               </div>
-              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4">
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5">
                 <span className="text-slate-400 block text-[11px] font-medium">Average Win</span>
                 <span className="text-base font-bold font-mono text-emerald-400">+{backtestResult.average_win_percent.toFixed(2)}%</span>
               </div>
-              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4">
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5">
                 <span className="text-slate-400 block text-[11px] font-medium">Average Loss</span>
                 <span className="text-base font-bold font-mono text-rose-400">{backtestResult.average_loss_percent.toFixed(2)}%</span>
               </div>
-              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4">
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5">
                 <span className="text-slate-400 block text-[11px] font-medium">Average Trade</span>
                 <span className={`text-base font-bold font-mono ${backtestResult.average_trade_percent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {backtestResult.average_trade_percent >= 0 ? '+' : ''}{backtestResult.average_trade_percent.toFixed(2)}%
                 </span>
               </div>
-              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4">
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5">
                 <span className="text-slate-400 block text-[11px] font-medium">Max Drawdown</span>
                 <span className="text-base font-bold font-mono text-rose-400">{backtestResult.max_drawdown_percent.toFixed(2)}%</span>
               </div>
-              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4">
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5">
                 <span className="text-slate-400 block text-[11px] font-medium">Avg Holding</span>
                 <span className="text-base font-bold font-mono text-slate-200">{backtestResult.average_holding_days.toFixed(1)} days</span>
               </div>
-              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4">
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3.5">
                 <span className="text-slate-400 block text-[11px] font-medium">Max Holding</span>
                 <span className="text-base font-bold font-mono text-slate-200">{backtestResult.maximum_holding_days} days</span>
               </div>
