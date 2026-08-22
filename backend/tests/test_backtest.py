@@ -26,27 +26,41 @@ class CustomSignalStrategy(BaseStrategy):
         self.signals_map = signals_map or {}
 
     def generate_signals(self, df: pd.DataFrame) -> list[StrategySignal]:
+        """
+        Returns exactly len(df) signals — one per candle — so the engine
+        can index the list by candle position. Candles not in signals_map
+        emit a HOLD signal.
+        """
         signals = []
         if df.empty:
             return signals
 
-        idx = len(df) - 1
         sym = df["symbol"].iloc[0] if "symbol" in df.columns else "TEST"
-        trade_date = df["trade_date"].iloc[-1]
 
-        if idx in self.signals_map:
-            sig_type, sl, tp = self.signals_map[idx]
-            signals.append(
-                StrategySignal(
-                    symbol=sym,
-                    strategy_name=self.name,
-                    strategy_version=self.version,
-                    signal=sig_type,
-                    signal_date=trade_date,
-                    stop_loss=sl,
-                    target_price=tp,
+        for idx in range(len(df)):
+            if idx in self.signals_map:
+                sig_type, sl, tp = self.signals_map[idx]
+                signals.append(
+                    StrategySignal(
+                        symbol=sym,
+                        strategy_name=self.name,
+                        strategy_version=self.version,
+                        signal=sig_type,
+                        signal_date=df["trade_date"].iloc[idx],
+                        stop_loss=sl,
+                        target_price=tp,
+                    )
                 )
-            )
+            else:
+                signals.append(
+                    StrategySignal(
+                        symbol=sym,
+                        strategy_name=self.name,
+                        strategy_version=self.version,
+                        signal=SignalType.HOLD,
+                        signal_date=df["trade_date"].iloc[idx],
+                    )
+                )
 
         return signals
 
@@ -247,11 +261,21 @@ def test_no_lookahead_behavior():
         name = "Lookahead Test Strategy"
 
         def generate_signals(self, df: pd.DataFrame) -> list[StrategySignal]:
-            # Evaluates only current slice
-            idx = len(df) - 1
-            if idx == 0:
-                return [StrategySignal(symbol="TEST", strategy_name=self.name, strategy_version="1.0", signal=SignalType.BUY, signal_date=df["trade_date"].iloc[-1])]
-            return []
+            # Emits one signal per candle: BUY at index 0, HOLD elsewhere.
+            # Candle 2's close value must NOT affect entry at candle 1 (no-lookahead).
+            signals = []
+            for i in range(len(df)):
+                sig = SignalType.BUY if i == 0 else SignalType.HOLD
+                signals.append(
+                    StrategySignal(
+                        symbol="TEST",
+                        strategy_name=self.name,
+                        strategy_version="1.0",
+                        signal=sig,
+                        signal_date=df["trade_date"].iloc[i],
+                    )
+                )
+            return signals
 
     df1 = pd.DataFrame({
         "symbol": ["TEST"] * 3,

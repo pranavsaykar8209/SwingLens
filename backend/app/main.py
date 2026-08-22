@@ -10,6 +10,7 @@ from backend.backtest import BacktestEngine, BacktestResult
 from backend.database.connection import get_db_connection
 from backend.indicators import calculate_indicators
 from backend.indicators.engine import get_price_history
+from backend.ranking import DailySignalRanking, DailySignalRanker
 from backend.scanner import MarketScanner, ScanSummary
 from backend.scanner.daily_workflow import get_daily_scan_status, run_daily_scan_workflow
 from backend.strategies.registry import _GLOBAL_REGISTRY, get_strategy, list_strategies
@@ -241,6 +242,56 @@ def aggregate_signals_for_symbol(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to aggregate signals for '{symbol_clean}': {e}",
+        )
+
+
+@app.get("/api/daily-signals", response_model=DailySignalRanking)
+def get_daily_signals(
+    index: str = Query(default="NIFTY_NEXT_50", description="Active index universe name"),
+    limit: Optional[int] = Query(
+        default=None,
+        description=(
+            "Top-N shortlist size (1–200). When provided, the response's 'shortlist' field "
+            "contains the top N ranked signals. The 'results' field always contains all evaluated stocks."
+        ),
+    ),
+):
+    """
+    Ranks today's active NIFTY Next 50 stocks by multi-strategy signal agreement.
+
+    For each active constituent, all 5 production strategies are run independently
+    and their signals are combined by the existing SignalAggregator (BUY=1 point,
+    other signals=0 points, no weights, no ML).
+
+    Ranking priority (deterministic):
+      1. Score (raw BUY count) — descending
+      2. BUY count            — descending (tie-break)
+      3. Best Risk/Reward     — descending (tie-break)
+      4. Symbol               — ascending (final deterministic tie-breaker)
+
+    Signal tiers:
+      STRONG_OPPORTUNITY   — VERY_STRONG or STRONG (4–5 strategies agree)
+      MODERATE_OPPORTUNITY — MODERATE (3 strategies agree)
+      WEAK_OR_NO_SIGNAL    — WEAK or NO_SIGNAL (0–2 strategies agree)
+
+    One stock failing does not cause the entire response to fail.
+    Failed stocks are counted in 'excluded_count'.
+    """
+    if limit is not None and not (1 <= limit <= 200):
+        raise HTTPException(
+            status_code=422,
+            detail=f"limit must be between 1 and 200, got {limit}.",
+        )
+
+    try:
+        ranker = DailySignalRanker()
+        ranking = ranker.run(index_name=index, limit=limit)
+        return ranking
+    except Exception as e:
+        logger.error(f"Error running daily signal ranking: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to compute daily signal ranking: {e}",
         )
 
 
