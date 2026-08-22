@@ -9,6 +9,7 @@ from .registry import (
 )
 from .examples.example_strategy import PassthroughHoldStrategy
 from .ema_pullback import EMAPullbackStrategy
+from .ma_trend_breakout import MATrendBreakoutStrategy
 
 __all__ = [
     "SignalType",
@@ -20,4 +21,6 @@ __all__ = [
     "list_strategies",
     "PassthroughHoldStrategy",
     "EMAPullbackStrategy",
+    "MATrendBreakoutStrategy",
 ]
+

@@ -159,10 +159,14 @@ def test_get_strategy_by_name():
 def test_list_strategies():
     strats = list_strategies()
     assert isinstance(strats, list)
-    assert len(strats) >= 1
+    assert len(strats) >= 2
+    names = [s["name"] for s in strats]
+    assert "EMA Pullback" in names
+    assert "MA Trend Breakout" in names
     for s in strats:
         assert "name" in s
         assert "version" in s
+
 
 
 # 12. Unknown Strategy Handling Test
