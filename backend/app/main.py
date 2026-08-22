@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
 
+from backend.aggregator import AggregatedSignalResult, SignalAggregator
 from backend.backtest import BacktestEngine, BacktestResult
 from backend.database.connection import get_db_connection
 from backend.indicators import calculate_indicators
@@ -188,6 +189,59 @@ def backtest_single_stock(
     engine = BacktestEngine(strategy=strat_obj)
     result = engine.run(df)
     return result
+
+
+@app.get("/api/aggregator/{symbol}", response_model=AggregatedSignalResult)
+def aggregate_signals_for_symbol(
+    symbol: str,
+    index: str = Query(default="NIFTY_NEXT_50", description="Index universe (informational, not used for filtering)"),
+    strategies: Optional[str] = Query(
+        default=None,
+        description=(
+            "Comma-separated list of strategy registry keys to include. "
+            "Defaults to all 5 production strategies: "
+            "ema_pullback, ma_trend_breakout, rsi_mean_reversion, macd_momentum, bollinger_squeeze."
+        ),
+    ),
+):
+    """
+    Runs all 5 production strategies (or a specified subset) independently
+    against the most recent daily candles for the given stock symbol and
+    returns a transparent, deterministic combined signal.
+
+    Scoring (no weights, no ML, no probability estimates):
+        BUY  → 1 point per strategy
+        HOLD / SELL / WATCH → 0 points
+        ERROR → strategy excluded from denominator
+
+    Strength thresholds:
+        0–1 → NO_SIGNAL
+        2   → WEAK
+        3   → MODERATE
+        4   → STRONG
+        5   → VERY_STRONG
+    """
+    symbol_clean = symbol.strip().upper()
+
+    strategy_keys = None
+    if strategies:
+        strategy_keys = [k.strip().lower() for k in strategies.split(",") if k.strip()]
+
+    try:
+        aggregator = SignalAggregator()
+        result = aggregator.aggregate_for_symbol(
+            symbol=symbol_clean,
+            strategy_keys=strategy_keys,
+        )
+        return result
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Error running signal aggregation for '{symbol_clean}': {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to aggregate signals for '{symbol_clean}': {e}",
+        )
 
 
 @app.get("/api/stocks/{symbol}/history", response_model=StockHistoryResponse)
