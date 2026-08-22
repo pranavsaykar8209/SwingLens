@@ -7,8 +7,8 @@ from backend.database.connection import get_db_connection, DEFAULT_DB_PATH
 from .atr import calculate_atr, calculate_tr
 from .ema import calculate_ema, calculate_sma
 from .macd import calculate_macd
+from .bollinger import calculate_bollinger_bands
 from .price_action import (
-
     distance_from_ema_pct,
     highest_high,
     lowest_low,
@@ -69,6 +69,8 @@ def calculate_indicators(df: pd.DataFrame, indicators: List[str]) -> pd.DataFram
     - "dist_ema_20_pct"
     - "pct_change_1"
     - "highest_high_20", "lowest_low_20"
+    - "macd", "macd_signal", "macd_histogram"
+    - "bb_middle_20", "bb_upper_20", "bb_lower_20", "bb_width_20"
 
     Returns:
     - New pandas DataFrame with requested indicator columns attached.
@@ -171,5 +173,28 @@ def calculate_indicators(df: pd.DataFrame, indicators: List[str]) -> pd.DataFram
                 res_df["macd_hist"] = h_line
             continue
 
-
+        # 13. Bollinger Bands: bb_middle_<period>, bb_upper_<period>, bb_lower_<period>, bb_width_<period>
+        match_bb = re.match(r"^bb_(middle|upper|lower|width)(?:_(\d+))?$", ind_clean)
+        if match_bb and close is not None:
+            period = int(match_bb.group(2)) if match_bb.group(2) else 20
+            mb_col = f"bb_middle_{period}"
+            ub_col = f"bb_upper_{period}"
+            lb_col = f"bb_lower_{period}"
+            bw_col = f"bb_width_{period}"
+            if mb_col not in res_df.columns or ub_col not in res_df.columns:
+                mb, ub, lb, bw = calculate_bollinger_bands(close, period=period, num_std=2.0)
+                res_df[mb_col] = mb
+                res_df[ub_col] = ub
+                res_df[lb_col] = lb
+                res_df[bw_col] = bw
+                # Also set un-suffixed or requested alias if needed
+                if ind not in res_df.columns:
+                    if match_bb.group(1) == "middle":
+                        res_df[ind] = mb
+                    elif match_bb.group(1) == "upper":
+                        res_df[ind] = ub
+                    elif match_bb.group(1) == "lower":
+                        res_df[ind] = lb
+                    elif match_bb.group(1) == "width":
+                        res_df[ind] = bw
     return res_df

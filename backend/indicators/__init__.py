@@ -4,8 +4,8 @@ from .rsi import calculate_rsi
 from .atr import calculate_tr, calculate_atr
 from .volume import calculate_volume_sma, calculate_relative_volume
 from .macd import calculate_macd
+from .bollinger import calculate_bollinger_bands
 from .price_action import (
-
     percentage_change,
     daily_return,
     distance_from_ema_pct,
@@ -29,6 +29,7 @@ __all__ = [
     "calculate_atr",
     "calculate_volume_sma",
     "calculate_relative_volume",
+    "calculate_bollinger_bands",
     "percentage_change",
     "daily_return",
     "distance_from_ema_pct",
@@ -43,6 +44,5 @@ __all__ = [
     "crossed_below",
     "calculate_macd",
     "get_price_history",
-
     "calculate_indicators",
 ]

@@ -12,6 +12,7 @@ from .ema_pullback import EMAPullbackStrategy
 from .ma_trend_breakout import MATrendBreakoutStrategy
 from .rsi_mean_reversion import RSIMeanReversionStrategy
 from .macd_momentum import MACDMomentumStrategy
+from .bollinger_squeeze import BollingerSqueezeStrategy
 
 __all__ = [
     "SignalType",
@@ -26,6 +27,7 @@ __all__ = [
     "MATrendBreakoutStrategy",
     "RSIMeanReversionStrategy",
     "MACDMomentumStrategy",
+    "BollingerSqueezeStrategy",
 ]
 
 
