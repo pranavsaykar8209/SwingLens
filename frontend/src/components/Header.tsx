@@ -1,27 +1,32 @@
 import React, { useState } from 'react';
+import { SafeLink, useSafeLocation } from '../utils/navigation';
 
 interface HeaderProps {
   scanDate?: string;
   universe?: string;
   strategy?: string;
   strategyVersion?: string;
-  onRefresh: (force?: boolean) => void;
+  scanStatus?: string;
+  onRefresh?: (force?: boolean) => void;
   isAlreadyCompleted?: boolean;
-  isRefreshing: boolean;
+  isRefreshing?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   scanDate,
   universe = 'NIFTY NEXT 50',
-  strategy = 'EMA Pullback',
-  strategyVersion = '1.0',
+  strategy,
+  strategyVersion,
+  scanStatus,
   onRefresh,
   isAlreadyCompleted = false,
-  isRefreshing,
+  isRefreshing = false,
 }) => {
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
+  const location = useSafeLocation();
 
   const handleButtonClick = () => {
+    if (!onRefresh) return;
     if (isAlreadyCompleted) {
       setShowConfirmModal(true);
     } else {
@@ -31,27 +36,61 @@ export const Header: React.FC<HeaderProps> = ({
 
   const handleConfirmRunAgain = () => {
     setShowConfirmModal(false);
-    onRefresh(true);
+    if (onRefresh) onRefresh(true);
   };
+
+  const isCompleted = isAlreadyCompleted || scanStatus === 'COMPLETED';
+
+  const navLinks = [
+    { to: '/', label: 'Recommendations' },
+    { to: '/watchlist', label: 'Watchlist' },
+    { to: '/analytics', label: 'Strategy Analytics' },
+  ];
 
   return (
     <>
-      <header className="bg-slate-900/90 border-b border-slate-800/80 backdrop-blur-xl sticky top-0 z-30 w-full px-6 sm:px-10 py-4 shadow-xl">
+      <header className="bg-slate-900/90 border-b border-slate-800/80 backdrop-blur-xl sticky top-0 z-30 w-full px-6 sm:px-10 py-3.5 shadow-xl">
         <div className="w-full flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          {/* Branding */}
-          <div className="flex items-center gap-3.5">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-cyan-400 flex items-center justify-center font-bold text-slate-950 text-xl shadow-lg shadow-emerald-500/25">
-              SL
-            </div>
-            <div>
-              <h1 className="text-2xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
-                SwingLens
-                <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 uppercase tracking-wide">
-                  Daily Scanner
-                </span>
-              </h1>
-              <p className="text-xs text-slate-400 font-medium">Quantitative Swing Trading Strategy & Market Analytics</p>
-            </div>
+          {/* Branding & Navigation Links */}
+          <div className="flex flex-wrap items-center gap-6">
+            <SafeLink to="/" className="flex items-center gap-3.5 group">
+              <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-cyan-400 flex items-center justify-center font-bold text-slate-950 text-xl shadow-lg shadow-emerald-500/25 group-hover:scale-105 transition-transform">
+                SL
+              </div>
+              <div>
+                <h1 className="text-2xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
+                  SwingLens
+                  <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 uppercase tracking-wide">
+                    Trading Research
+                  </span>
+                </h1>
+                <p className="text-xs text-slate-400 font-medium">Quantitative Swing Trading Strategy & Market Analytics</p>
+              </div>
+            </SafeLink>
+
+            {/* Navigation Tabs */}
+            <nav className="flex items-center gap-1.5 bg-slate-950/60 p-1 rounded-xl border border-slate-800">
+              {navLinks.map((link) => {
+                const isActive =
+                  link.to === '/'
+                    ? location.pathname === '/' || location.pathname.startsWith('/stocks')
+                    : location.pathname.startsWith(link.to);
+
+                return (
+                  <SafeLink
+                    key={link.to}
+                    to={link.to}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-mono font-semibold transition-all ${
+                      isActive
+                        ? 'bg-slate-800 text-emerald-400 shadow-sm border border-slate-700/80'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                    }`}
+                  >
+                    {link.label}
+                  </SafeLink>
+                );
+              })}
+            </nav>
           </div>
 
           {/* Scan Meta Badges & Action Button */}
@@ -66,31 +105,47 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="font-bold text-slate-100">{universe}</span>
             </div>
 
+            {strategy ? (
+              <div className="flex items-center gap-2 text-xs bg-slate-800/90 border border-slate-700/60 rounded-xl px-3.5 py-2 text-slate-300 font-mono shadow-sm">
+                <span className="text-slate-400">Strategy:</span>
+                <span className="font-bold text-emerald-400">{strategy} {strategyVersion ? `v${strategyVersion}` : ''}</span>
+              </div>
+            ) : null}
+
             <div className="flex items-center gap-2 text-xs bg-slate-800/90 border border-slate-700/60 rounded-xl px-3.5 py-2 text-slate-300 font-mono shadow-sm">
-              <span className="text-slate-400">Strategy:</span>
-              <span className="font-bold text-emerald-400">{strategy} v{strategyVersion}</span>
+              <span className="text-slate-400">Status:</span>
+              <span
+                className={`font-bold inline-flex items-center gap-1.5 ${
+                  isCompleted ? 'text-emerald-400' : isRefreshing ? 'text-cyan-400 animate-pulse' : 'text-amber-400'
+                }`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${isCompleted ? 'bg-emerald-400' : isRefreshing ? 'bg-cyan-400' : 'bg-amber-400'}`} />
+                {isRefreshing ? 'RUNNING' : scanStatus || (isCompleted ? 'COMPLETED' : 'READY')}
+              </span>
             </div>
 
-            <button
-              onClick={handleButtonClick}
-              disabled={isRefreshing}
-              className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 active:from-emerald-700 active:to-teal-600 disabled:opacity-50 text-white font-semibold text-xs px-4 py-2.5 rounded-xl transition-all shadow-lg shadow-emerald-900/30 cursor-pointer border border-emerald-400/30"
-            >
-              <svg
-                className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+            {onRefresh && (
+              <button
+                onClick={handleButtonClick}
+                disabled={isRefreshing}
+                className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 active:from-emerald-700 active:to-teal-600 disabled:opacity-50 text-white font-semibold text-xs px-4 py-2.5 rounded-xl transition-all shadow-lg shadow-emerald-900/30 cursor-pointer border border-emerald-400/30"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                />
-              </svg>
-              {isRefreshing ? "Running Today's Scan..." : "↻ Run Today's Scan"}
-            </button>
+                <svg
+                  className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                  />
+                </svg>
+                {isRefreshing ? "Running Today's Scan..." : "↻ Run Today's Scan"}
+              </button>
+            )}
           </div>
         </div>
       </header>

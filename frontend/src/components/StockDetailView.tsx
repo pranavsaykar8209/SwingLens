@@ -1,27 +1,111 @@
-import React, { useState } from 'react';
-import { fetchSingleStockBacktest, type ScanResult, type SingleStockBacktestResult } from '../api/scanner';
+import React, { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import {
+  fetchAggregatedSignals,
+  fetchSingleStockBacktest,
+  type AggregatedSignalResult,
+  type ScanResult,
+  type SingleStockBacktestResult,
+} from '../api/scanner';
+import { useSafeNavigate } from '../utils/navigation';
 import { StockPriceChart } from './StockPriceChart';
+import { StrengthBadge } from './StrengthBadge';
+
+export interface StockDetailItem {
+  symbol: string;
+  company_name?: string | null;
+  signal?: string;
+  signal_date?: string | null;
+  entry_price?: number | null;
+  stop_loss?: number | null;
+  target_price?: number | null;
+  risk_reward?: number | null;
+  score?: number | null;
+  strength?: string | null;
+  strategy_name?: string | null;
+  strategy_version?: string | null;
+  best_strategy_name?: string | null;
+  buy_strategies?: string[];
+  reason?: string | null;
+  metadata?: Record<string, unknown>;
+}
 
 interface StockDetailViewProps {
-  stock: ScanResult;
-  onBack: () => void;
+  stock?: StockDetailItem | ScanResult;
+  onBack?: () => void;
 }
 
 export const StockDetailView: React.FC<StockDetailViewProps> = ({
-  stock,
+  stock: passedStock,
   onBack,
 }) => {
+  let routeSymbol: string | undefined;
+  try {
+    const params = useParams<{ symbol: string }>();
+    routeSymbol = params?.symbol;
+  } catch {
+    routeSymbol = undefined;
+  }
+
+  const navigate = useSafeNavigate();
+
+  const currentSymbol = passedStock?.symbol || routeSymbol || 'BANKBARODA';
+  const stock: StockDetailItem = passedStock || { symbol: currentSymbol };
+
   const [loadingBacktest, setLoadingBacktest] = useState(false);
   const [backtestResult, setBacktestResult] = useState<SingleStockBacktestResult | null>(null);
   const [backtestError, setBacktestError] = useState<string | null>(null);
 
-  const isBuy = stock.signal === 'BUY';
+  const [loadingAggregator, setLoadingAggregator] = useState(false);
+  const [aggregatedResult, setAggregatedResult] = useState<AggregatedSignalResult | null>(null);
+  const [aggregatorError, setAggregatorError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadAggregator() {
+      setLoadingAggregator(true);
+      setAggregatorError(null);
+      try {
+        const agg = await fetchAggregatedSignals(currentSymbol);
+        if (isMounted) {
+          setAggregatedResult(agg);
+        }
+      } catch (err: unknown) {
+        if (isMounted) {
+          const msg = err instanceof Error ? err.message : 'Failed to load strategy votes.';
+          setAggregatorError(msg);
+        }
+      } finally {
+        if (isMounted) {
+          setLoadingAggregator(false);
+        }
+      }
+    }
+    loadAggregator();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentSymbol]);
+
+  const entryPrice = stock.entry_price ?? aggregatedResult?.best_entry_price;
+  const stopLoss = stock.stop_loss ?? aggregatedResult?.best_stop_loss;
+  const targetPrice = stock.target_price ?? aggregatedResult?.best_target_price;
+  const riskReward = stock.risk_reward ?? aggregatedResult?.best_risk_reward;
+  const strengthVal =
+    ('strength' in stock ? stock.strength : undefined) ?? aggregatedResult?.strength ?? 'NO_SIGNAL';
+  const scoreVal = stock.score ?? aggregatedResult?.score ?? 0;
+  const strategyName =
+    ('best_strategy_name' in stock ? stock.best_strategy_name : undefined) ||
+    stock.strategy_name ||
+    aggregatedResult?.best_strategy_name ||
+    'Multi-Strategy';
 
   const handleRunBacktest = async () => {
     setLoadingBacktest(true);
     setBacktestError(null);
     try {
-      const res = await fetchSingleStockBacktest(stock.symbol, stock.strategy_name || 'ema_pullback');
+      const stratKey = (stock.strategy_name || 'ema_pullback').toLowerCase().replace(/ /g, '_');
+      const res = await fetchSingleStockBacktest(currentSymbol, stratKey);
       setBacktestResult(res);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to run single-stock backtest.';
@@ -31,13 +115,37 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
     }
   };
 
+  const handleBackClick = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      navigate('/');
+    }
+  };
+
+  // Convert stock to format expected by StockPriceChart
+  const chartStockProp: ScanResult = {
+    symbol: currentSymbol,
+    company_name: stock.company_name,
+    signal: (stock.signal as any) || (scoreVal > 0 ? 'BUY' : 'HOLD'),
+    signal_date: stock.signal_date || aggregatedResult?.signal_date,
+    entry_price: entryPrice,
+    stop_loss: stopLoss,
+    target_price: targetPrice,
+    risk_reward: riskReward,
+    strategy_name: strategyName,
+    strategy_version: stock.strategy_version || '1.0',
+    metadata: stock.metadata,
+    status: 'SUCCESS',
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased pb-16">
-      {/* Top Navigation Bar - Full Width */}
+      {/* Top Navigation Bar */}
       <div className="bg-slate-900/90 border-b border-slate-800/80 backdrop-blur-xl sticky top-0 z-40 w-full px-6 sm:px-10 py-4 shadow-xl">
         <div className="w-full flex items-center justify-between">
           <button
-            onClick={onBack}
+            onClick={handleBackClick}
             className="group flex items-center gap-2.5 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/90 hover:bg-slate-800 px-4 py-2.5 rounded-xl border border-slate-700/70 transition-all cursor-pointer shadow-sm"
           >
             <svg className="w-4 h-4 transition-transform group-hover:-translate-x-1 text-slate-400 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -64,46 +172,41 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
-                Backtest This Stock
+                Backtest Historical Performance
               </>
             )}
           </button>
         </div>
       </div>
 
-      {/* Main Stock Detail Page Container - Full Width */}
+      {/* Main Stock Detail Container */}
       <main className="w-full px-6 sm:px-10 py-8 space-y-8">
         {/* Title Banner Header */}
         <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xl">
           <div>
             <div className="flex items-center gap-3.5">
-              <h1 className="text-3xl sm:text-4xl font-extrabold text-white font-mono tracking-tight">{stock.symbol}</h1>
-              <span
-                className={`text-xs px-3.5 py-1 rounded-md font-extrabold border ${
-                  isBuy
-                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/10'
-                    : stock.signal === 'WATCH'
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                    : stock.signal === 'ERROR'
-                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
-                    : 'bg-slate-700/40 text-slate-300 border-slate-600/40'
-                }`}
-              >
-                {stock.signal}
+              <h1 className="text-3xl sm:text-4xl font-extrabold text-white font-mono tracking-tight">
+                {currentSymbol}
+              </h1>
+              <StrengthBadge strength={strengthVal} size="md" />
+              <span className="text-xs px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 font-mono font-bold">
+                Score: {scoreVal}/{aggregatedResult?.strategies_evaluated || 5}
               </span>
             </div>
-            <p className="text-sm sm:text-base text-slate-300 font-medium mt-1.5">{stock.company_name || stock.symbol}</p>
+            <p className="text-sm sm:text-base text-slate-300 font-medium mt-1.5">
+              {stock.company_name || currentSymbol}
+            </p>
           </div>
 
           <div className="text-xs text-slate-400 font-mono bg-slate-800/60 border border-slate-700/60 rounded-xl px-5 py-3 flex items-center gap-6 shadow-inner">
             <div>
-              <span className="text-slate-500 block text-[10px] tracking-wider uppercase font-semibold">SCANNER DATE</span>
-              <span className="text-slate-100 font-bold text-sm">{stock.signal_date || 'Latest'}</span>
+              <span className="text-slate-500 block text-[10px] tracking-wider uppercase font-semibold">SIGNAL DATE</span>
+              <span className="text-slate-100 font-bold text-sm">{stock.signal_date || aggregatedResult?.signal_date || 'Latest'}</span>
             </div>
             <div className="h-7 w-px bg-slate-700/60" />
             <div>
-              <span className="text-slate-500 block text-[10px] tracking-wider uppercase font-semibold">STRATEGY</span>
-              <span className="text-emerald-400 font-bold text-sm">{stock.strategy_name} v{stock.strategy_version}</span>
+              <span className="text-slate-500 block text-[10px] tracking-wider uppercase font-semibold">STRATEGY ALIGNMENT</span>
+              <span className="text-emerald-400 font-bold text-sm">{aggregatedResult?.buy_count || 0}/5 BUYs</span>
             </div>
           </div>
         </div>
@@ -117,25 +220,25 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
             <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4 sm:p-5 shadow-sm">
               <span className="text-xs text-slate-400 block mb-1 font-medium">Entry Price</span>
               <span className="text-2xl font-extrabold font-mono text-emerald-400">
-                {stock.entry_price !== null && stock.entry_price !== undefined ? `₹${stock.entry_price.toFixed(2)}` : '-'}
+                {entryPrice !== null && entryPrice !== undefined ? `₹${entryPrice.toFixed(2)}` : '-'}
               </span>
             </div>
             <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4 sm:p-5 shadow-sm">
               <span className="text-xs text-slate-400 block mb-1 font-medium">Stop Loss</span>
               <span className="text-2xl font-extrabold font-mono text-rose-400">
-                {stock.stop_loss !== null && stock.stop_loss !== undefined ? `₹${stock.stop_loss.toFixed(2)}` : '-'}
+                {stopLoss !== null && stopLoss !== undefined ? `₹${stopLoss.toFixed(2)}` : '-'}
               </span>
             </div>
             <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4 sm:p-5 shadow-sm">
               <span className="text-xs text-slate-400 block mb-1 font-medium">Target Price</span>
               <span className="text-2xl font-extrabold font-mono text-teal-300">
-                {stock.target_price !== null && stock.target_price !== undefined ? `₹${stock.target_price.toFixed(2)}` : '-'}
+                {targetPrice !== null && targetPrice !== undefined ? `₹${targetPrice.toFixed(2)}` : '-'}
               </span>
             </div>
             <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4 sm:p-5 shadow-sm">
               <span className="text-xs text-slate-400 block mb-1 font-medium">Risk : Reward</span>
               <span className="text-2xl font-extrabold font-mono text-amber-300">
-                {stock.risk_reward !== null && stock.risk_reward !== undefined ? `${stock.risk_reward}:1` : '-'}
+                {riskReward !== null && riskReward !== undefined ? `${riskReward}:1` : '-'}
               </span>
             </div>
           </div>
@@ -143,20 +246,102 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
 
         {/* 2. Full-Width Historical Price Chart */}
         <section className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 sm:p-8 shadow-xl">
-          <StockPriceChart stock={stock} backtestTrades={backtestResult?.trades || []} />
+          <StockPriceChart stock={chartStockProp} backtestTrades={backtestResult?.trades || []} />
         </section>
 
         {/* 3. Strategy Setup Breakdown */}
-        <section className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 sm:p-8 shadow-xl">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 font-mono">
-            Strategy Setup Breakdown
-          </h2>
-          <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-5 text-xs sm:text-sm text-slate-200 leading-relaxed font-mono">
-            {stock.reason || 'No setup breakdown specified.'}
+        {stock.reason && (
+          <section className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 sm:p-8 shadow-xl">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 font-mono">
+              Strategy Setup Breakdown
+            </h2>
+            <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-5 text-xs sm:text-sm text-slate-200 leading-relaxed font-mono">
+              {stock.reason}
+            </div>
+          </section>
+        )}
+
+        {/* 4. Multi-Strategy Individual Votes (5 Strategies) */}
+        <section className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 sm:p-8 shadow-xl space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+            <div>
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono">
+                Individual Strategy Votes (5 Strategies)
+              </h2>
+              <p className="text-xs text-slate-500 font-sans mt-0.5">
+                Evaluated independently on completed daily candles
+              </p>
+            </div>
+            {loadingAggregator && (
+              <span className="text-xs text-slate-400 font-mono animate-pulse">Loading votes...</span>
+            )}
           </div>
+
+          {aggregatorError && (
+            <div className="p-4 bg-rose-950/20 border border-rose-500/30 rounded-xl text-xs text-rose-300 font-mono">
+              {aggregatorError}
+            </div>
+          )}
+
+          {aggregatedResult && (
+            <div className="overflow-x-auto rounded-xl border border-slate-800/80">
+              <table className="w-full text-left border-collapse text-xs font-mono">
+                <thead>
+                  <tr className="bg-slate-800/50 border-b border-slate-700/60 text-slate-400 uppercase tracking-wider text-[11px]">
+                    <th className="py-3 px-4">Strategy</th>
+                    <th className="py-3 px-3 text-center">Signal</th>
+                    <th className="py-3 px-3 text-right">Entry</th>
+                    <th className="py-3 px-3 text-right">Stop Loss</th>
+                    <th className="py-3 px-3 text-right">Target</th>
+                    <th className="py-3 px-3 text-center">R:R</th>
+                    <th className="py-3 px-4">Setup Reasoning</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/50 text-slate-200">
+                  {aggregatedResult.votes.map((vote) => {
+                    const isVoteBuy = vote.signal === 'BUY';
+                    return (
+                      <tr key={vote.strategy_name} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="py-3 px-4">
+                          <span className="font-extrabold text-slate-100">{vote.strategy_name}</span>
+                          <span className="text-[10px] text-slate-500 ml-1.5">v{vote.strategy_version}</span>
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <span
+                            className={`text-[10px] px-2.5 py-0.5 rounded font-extrabold border ${
+                              isVoteBuy
+                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                : 'bg-slate-800 text-slate-400 border-slate-700'
+                            }`}
+                          >
+                            {vote.signal}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-right font-medium">
+                          {vote.entry_price ? `₹${vote.entry_price.toFixed(2)}` : '-'}
+                        </td>
+                        <td className="py-3 px-3 text-right font-medium">
+                          {vote.stop_loss ? `₹${vote.stop_loss.toFixed(2)}` : '-'}
+                        </td>
+                        <td className="py-3 px-3 text-right font-medium">
+                          {vote.target_price ? `₹${vote.target_price.toFixed(2)}` : '-'}
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          {vote.risk_reward ? `${vote.risk_reward.toFixed(1)}:1` : '-'}
+                        </td>
+                        <td className="py-3 px-4 text-slate-300 text-[11px] font-sans">
+                          {vote.reason || vote.error || 'No setup breakdown specified.'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
-        {/* 4. Calculated Indicators */}
+        {/* 5. Calculated Indicators */}
         {stock.metadata && Object.keys(stock.metadata).length > 0 && (
           <section className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 sm:p-8 shadow-xl">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 font-mono">
@@ -173,7 +358,7 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
           </section>
         )}
 
-        {/* 5. Backtest Results Section */}
+        {/* 6. Backtest Results Section */}
         {backtestError && (
           <div className="bg-rose-950/30 border border-rose-500/40 rounded-2xl p-5 text-xs text-rose-300 font-mono shadow-lg">
             <span className="font-bold block mb-1">Backtest Execution Error:</span>
@@ -248,91 +433,9 @@ export const StockDetailView: React.FC<StockDetailViewProps> = ({
                 <span className="text-slate-400 block text-[11px] font-medium">Max Holding</span>
                 <span className="text-base font-bold font-mono text-slate-200">{backtestResult.maximum_holding_days} days</span>
               </div>
-              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4">
-                <span className="text-slate-400 block text-[11px] font-medium">Average R</span>
-                <span className="text-base font-bold font-mono text-amber-300">{backtestResult.average_r_multiple.toFixed(2)}</span>
-              </div>
-              <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-4">
-                <span className="text-slate-400 block text-[11px] font-medium">Total R</span>
-                <span className={`text-base font-bold font-mono ${backtestResult.total_r >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {backtestResult.total_r >= 0 ? '+' : ''}{backtestResult.total_r.toFixed(2)}
-                </span>
-              </div>
-            </div>
-
-            {/* Historical Trades Table */}
-            <div>
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 font-mono">
-                Historical Trades Log ({backtestResult.trades.length})
-              </h4>
-              {backtestResult.trades.length === 0 ? (
-                <div className="bg-slate-950/40 border border-slate-800 rounded-xl p-4 text-xs text-slate-400 font-mono text-center italic">
-                  No completed trades generated by strategy for this stock.
-                </div>
-              ) : (
-                <div className="overflow-x-auto rounded-xl border border-slate-800">
-                  <table className="w-full text-left text-xs font-mono">
-                    <thead className="bg-slate-800/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-700/60">
-                      <tr>
-                        <th className="py-3 px-4">Signal</th>
-                        <th className="py-3 px-4">Entry</th>
-                        <th className="py-3 px-4">Entry Price</th>
-                        <th className="py-3 px-4">Stop Loss</th>
-                        <th className="py-3 px-4">Target</th>
-                        <th className="py-3 px-4">Exit</th>
-                        <th className="py-3 px-4">Exit Price</th>
-                        <th className="py-3 px-4">Result</th>
-                        <th className="py-3 px-4 text-right">P&L %</th>
-                        <th className="py-3 px-4 text-right">R-Mult</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/60 bg-slate-900/60">
-                      {backtestResult.trades.map((t, idx) => {
-                        const isWin = t.pnl_percent > 0;
-                        return (
-                          <tr key={t.trade_id || idx} className="hover:bg-slate-800/40 transition-colors">
-                            <td className="py-3 px-4 text-slate-400">{t.signal_date || t.entry_date}</td>
-                            <td className="py-3 px-4 text-slate-300">{t.entry_date}</td>
-                            <td className="py-3 px-4 text-emerald-400 font-bold">₹{t.entry_price.toFixed(2)}</td>
-                            <td className="py-3 px-4 text-rose-400">{t.stop_loss ? `₹${t.stop_loss.toFixed(2)}` : '-'}</td>
-                            <td className="py-3 px-4 text-teal-300">{t.target_price ? `₹${t.target_price.toFixed(2)}` : '-'}</td>
-                            <td className="py-3 px-4 text-slate-300">{t.exit_date}</td>
-                            <td className="py-3 px-4 text-slate-200 font-bold">₹{t.exit_price.toFixed(2)}</td>
-                            <td className="py-3 px-4">
-                              <span
-                                className={`text-[10px] px-2 py-0.5 rounded font-bold border ${
-                                  t.exit_reason === 'TARGET'
-                                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                                    : t.exit_reason === 'STOP_LOSS'
-                                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
-                                    : 'bg-slate-700/40 text-slate-300 border-slate-600/40'
-                                }`}
-                              >
-                                {t.exit_reason}
-                              </span>
-                            </td>
-                            <td className={`py-3 px-4 text-right font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
-                              {isWin ? '+' : ''}{t.pnl_percent.toFixed(2)}%
-                            </td>
-                            <td className={`py-3 px-4 text-right font-bold ${t.r_multiple && t.r_multiple > 0 ? 'text-emerald-400' : t.r_multiple && t.r_multiple < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
-                              {t.r_multiple !== null && t.r_multiple !== undefined ? `${t.r_multiple > 0 ? '+' : ''}${t.r_multiple.toFixed(2)}` : '-'}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
             </div>
           </section>
         )}
-
-        {/* Strategy Notice Disclaimer */}
-        <div className="bg-slate-900/40 border border-slate-800/80 rounded-xl p-4 text-[11px] text-slate-400">
-          <span className="font-bold text-slate-300 block mb-0.5">Strategy Signals Disclaimer</span>
-          Quantitative setup generated by {stock.strategy_name} v{stock.strategy_version}. These signals represent technical pattern filters for analytical research purposes and are not financial advice.
-        </div>
       </main>
     </div>
   );

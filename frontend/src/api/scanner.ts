@@ -1,112 +1,49 @@
-export type ScanSignalType = 'BUY' | 'WATCH' | 'HOLD' | 'ERROR';
+/**
+ * API Service layer for SwingLens frontend.
+ * Includes in-flight request deduplication to prevent duplicate HTTP calls during React StrictMode / mounts.
+ */
+import type {
+  AggregatedSignalResult,
+  DailyScanStatusResponse,
+  DailySignalRanking,
+  ScanSummary,
+  SingleStockBacktestResult,
+  StockHistoryResponse,
+  StrategyAnalyticsResponse,
+  WatchlistSetup,
+} from './types';
 
-export interface ScanResult {
-  symbol: string;
-  company_name?: string | null;
-  signal: ScanSignalType;
-  signal_date?: string | null;
-  close?: number | null;
-  entry_price?: number | null;
-  stop_loss?: number | null;
-  target_price?: number | null;
-  risk_reward?: number | null;
-  score?: number | null;
-  strategy_name: string;
-  strategy_version: string;
-  reason?: string | null;
-  metadata?: Record<string, unknown>;
-  error?: string | null;
-  status: string;
-}
+export * from './types';
 
-export interface ScanSummary {
-  scan_date: string;
-  universe: string;
-  strategy: string;
-  strategy_version: string;
-  stocks_scanned: number;
-  buy_count: number;
-  watch_count: number;
-  hold_count: number;
-  skip_count: number;
-  results: ScanResult[];
-}
+// In-flight promise map for deduplication of concurrent identical GET requests
+const inFlightRequests = new Map<string, Promise<any>>();
 
-export interface DailyScanStatusResponse {
-  scan_date: string;
-  already_completed: boolean;
-  status: 'COMPLETED' | 'NOT_RUN' | 'RUNNING' | 'FAILED';
-  latest_market_date?: string | null;
-  last_completed_at?: string | null;
-  buy_count: number;
-  watch_count: number;
-  hold_count: number;
-  skipped_count: number;
-  error_message?: string | null;
-}
+async function apiGet<T>(url: string): Promise<T> {
+  if (inFlightRequests.has(url)) {
+    return inFlightRequests.get(url)!;
+  }
 
-export interface BacktestTrade {
-  trade_id?: string;
-  symbol: string;
-  strategy_name: string;
-  strategy_version: string;
-  signal_date: string;
-  entry_date: string;
-  entry_price: number;
-  stop_loss?: number | null;
-  target_price?: number | null;
-  exit_date: string;
-  exit_price: number;
-  exit_reason: string;
-  pnl_points: number;
-  pnl_percent: number;
-  r_multiple?: number | null;
-  holding_days: number;
-  status: string;
-}
+  const promise = (async () => {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          Accept: 'application/json',
+        },
+      });
 
-export interface SingleStockBacktestResult {
-  symbol: string;
-  strategy_name: string;
-  strategy_version: string;
-  start_date: string;
-  end_date: string;
-  total_trades: number;
-  winning_trades: number;
-  losing_trades: number;
-  open_trades: number;
-  win_rate: number;
-  average_win_percent: number;
-  average_loss_percent: number;
-  average_trade_percent: number;
-  profit_factor: number;
-  max_drawdown_percent: number;
-  average_holding_days: number;
-  maximum_holding_days: number;
-  average_r_multiple: number;
-  total_r: number;
-  winning_r: number;
-  losing_r: number;
-  ambiguity_policy_note?: string;
-  trades: BacktestTrade[];
-  warnings?: string[];
-}
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `API request to ${url} failed with HTTP ${response.status}`);
+      }
 
-export interface StockHistoryCandle {
-  date: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-  ema20?: number | null;
-  ema50?: number | null;
-  ema200?: number | null;
-}
+      return await response.json();
+    } finally {
+      inFlightRequests.delete(url);
+    }
+  })();
 
-export interface StockHistoryResponse {
-  symbol: string;
-  data: StockHistoryCandle[];
+  inFlightRequests.set(url, promise);
+  return promise;
 }
 
 /**
@@ -117,19 +54,7 @@ export async function fetchDailyScanStatus(
   strategy: string = 'ema_pullback'
 ): Promise<DailyScanStatusResponse> {
   const url = `/api/daily-scan/status?universe=${encodeURIComponent(universe)}&strategy=${encodeURIComponent(strategy)}`;
-
-  const response = await fetch(url, {
-    headers: {
-      Accept: 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || `Daily scan status API returned HTTP ${response.status}`);
-  }
-
-  return await response.json();
+  return apiGet<DailyScanStatusResponse>(url);
 }
 
 /**
@@ -158,27 +83,60 @@ export async function runDailyScanWorkflow(
 }
 
 /**
- * Fetches the latest daily market scan results from FastAPI backend.
+ * Fetches the latest daily market scan results for a single strategy.
  */
 export async function fetchLatestScan(
   strategy: string = 'ema_pullback',
   index: string = 'NIFTY_NEXT_50'
 ): Promise<ScanSummary> {
   const url = `/api/scanner/latest?strategy=${encodeURIComponent(strategy)}&index=${encodeURIComponent(index)}`;
-  
-  const response = await fetch(url, {
-    headers: {
-      Accept: 'application/json',
-    },
-  });
+  return apiGet<ScanSummary>(url);
+}
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || `Scanner API returned HTTP ${response.status}`);
+/**
+ * Fetches today's multi-strategy daily signal ranking and top setups.
+ */
+export async function fetchDailySignals(
+  limit: number = 10,
+  index: string = 'NIFTY_NEXT_50'
+): Promise<DailySignalRanking> {
+  const url = `/api/daily-signals?index=${encodeURIComponent(index)}&limit=${limit}`;
+  return apiGet<DailySignalRanking>(url);
+}
+
+/**
+ * Fetches aggregated multi-strategy signals and individual votes for a specific stock.
+ */
+export async function fetchAggregatedSignals(
+  symbol: string,
+  strategies?: string
+): Promise<AggregatedSignalResult> {
+  let url = `/api/aggregator/${encodeURIComponent(symbol)}`;
+  if (strategies) {
+    url += `?strategies=${encodeURIComponent(strategies)}`;
   }
+  return apiGet<AggregatedSignalResult>(url);
+}
 
-  const data: ScanSummary = await response.json();
-  return data;
+/**
+ * Fetches active watchlist setups.
+ */
+export async function fetchActiveWatchlist(): Promise<WatchlistSetup[]> {
+  const url = `/api/watchlist?status=ACTIVE`;
+  return apiGet<WatchlistSetup[]>(url);
+}
+
+/**
+ * Fetches strategy historical quality analytics.
+ */
+export async function fetchStrategyAnalytics(
+  symbols?: string
+): Promise<StrategyAnalyticsResponse> {
+  let url = `/api/analytics/strategies`;
+  if (symbols) {
+    url += `?symbols=${encodeURIComponent(symbols)}`;
+  }
+  return apiGet<StrategyAnalyticsResponse>(url);
 }
 
 /**
@@ -192,19 +150,7 @@ export async function fetchStockHistory(
   if (days && days > 0) {
     url += `?days=${days}`;
   }
-
-  const response = await fetch(url, {
-    headers: {
-      Accept: 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || `History API returned HTTP ${response.status}`);
-  }
-
-  return await response.json();
+  return apiGet<StockHistoryResponse>(url);
 }
 
 /**
@@ -219,17 +165,5 @@ export async function fetchSingleStockBacktest(
   let url = `/api/backtest/${encodeURIComponent(symbol)}?strategy=${encodeURIComponent(strategy)}`;
   if (startDate) url += `&start_date=${encodeURIComponent(startDate)}`;
   if (endDate) url += `&end_date=${encodeURIComponent(endDate)}`;
-
-  const response = await fetch(url, {
-    headers: {
-      Accept: 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || `Backtest API returned HTTP ${response.status}`);
-  }
-
-  return await response.json();
+  return apiGet<SingleStockBacktestResult>(url);
 }

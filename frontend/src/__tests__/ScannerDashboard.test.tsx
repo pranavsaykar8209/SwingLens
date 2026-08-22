@@ -91,6 +91,7 @@ const mockCompletedStatus: DailyScanStatusResponse = {
 describe('React Daily Market Scanner Dashboard Suite', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    window.history.pushState({}, '', '/');
   });
 
   it('1. Renders Header component with scan metadata', () => {

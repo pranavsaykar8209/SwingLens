@@ -1,55 +1,83 @@
 import { useCallback, useEffect, useState } from 'react';
+import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import {
+  fetchActiveWatchlist,
   fetchDailyScanStatus,
-  fetchLatestScan,
+  fetchDailySignals,
+  fetchStrategyAnalytics,
   runDailyScanWorkflow,
   type DailyScanStatusResponse,
-  type ScanResult,
+  type DailySignalRanking,
+  type RankedSignal,
   type ScanSummary,
+  type StrategyAnalyticsResponse,
+  type WatchlistSetup,
 } from './api/scanner';
-import { AllStocksTable } from './components/AllStocksTable';
-import { BuySignalsTable } from './components/BuySignalsTable';
 import { Header } from './components/Header';
 import { StockDetailView } from './components/StockDetailView';
+import { StrategyPerformancePreview } from './components/StrategyPerformancePreview';
 import { SummaryCards } from './components/SummaryCards';
+import { TopSetupsTable } from './components/TopSetupsTable';
+import { WatchlistPreview } from './components/WatchlistPreview';
+import { AnalyticsPage } from './pages/AnalyticsPage';
+import { WatchlistPage } from './pages/WatchlistPage';
 
-export function App() {
-  const [data, setData] = useState<ScanSummary | null>(null);
+function DashboardView() {
+  const navigate = useNavigate();
+  const [dailyRanking, setDailyRanking] = useState<DailySignalRanking | null>(null);
+  const [legacyScan, setLegacyScan] = useState<ScanSummary | null>(null);
   const [statusData, setStatusData] = useState<DailyScanStatusResponse | null>(null);
+  const [watchlistSetups, setWatchlistSetups] = useState<WatchlistSetup[]>([]);
+  const [strategyAnalytics, setStrategyAnalytics] = useState<StrategyAnalyticsResponse | null>(null);
+
   const [loading, setLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [progressStep, setProgressStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selectedStock, setSelectedStock] = useState<ScanResult | null>(null);
 
-  const executeWorkflow = useCallback(async (force: boolean = false) => {
-    setIsRefreshing(true);
-    setError(null);
+  const [selectedStrategyFilter, setSelectedStrategyFilter] = useState<string>('ALL');
 
-    try {
-      setProgressStep("Checking market data...");
-      await new Promise((r) => setTimeout(r, 150));
+  const loadDashboardData = useCallback(async () => {
+    const [statusRes, rankingRes, watchlistRes, analyticsRes] = await Promise.all([
+      fetchDailyScanStatus().catch((err) => {
+        throw err;
+      }),
+      fetchDailySignals(10).catch(() => null),
+      fetchActiveWatchlist().catch(() => []),
+      fetchStrategyAnalytics().catch(() => null),
+    ]);
 
-      setProgressStep("Updating Nifty Next 50 market data...");
-      await new Promise((r) => setTimeout(r, 150));
-
-      setProgressStep("Validating market candles...");
-      await new Promise((r) => setTimeout(r, 150));
-
-      setProgressStep("Running EMA Pullback scanner...");
-      const summary = await runDailyScanWorkflow(force);
-      setData(summary);
-
-      const statusRes = await fetchDailyScanStatus();
-      setStatusData(statusRes);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Today's scan could not be completed.";
-      setError(msg);
-    } finally {
-      setIsRefreshing(false);
-      setProgressStep(null);
-    }
+    if (statusRes) setStatusData(statusRes);
+    if (rankingRes) setDailyRanking(rankingRes);
+    if (watchlistRes) setWatchlistSetups(watchlistRes);
+    if (analyticsRes) setStrategyAnalytics(analyticsRes);
   }, []);
+
+  const executeWorkflow = useCallback(
+    async (force: boolean = false) => {
+      setIsRefreshing(true);
+      setError(null);
+
+      try {
+        setProgressStep('Checking market data...');
+        await new Promise((r) => setTimeout(r, 100));
+
+        setProgressStep('Running daily multi-strategy scan workflow...');
+        const scanRes = await runDailyScanWorkflow(force);
+        if (scanRes) setLegacyScan(scanRes);
+
+        setProgressStep('Aggregating rankings and strategy performance...');
+        await loadDashboardData();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Today's scan could not be completed.";
+        setError(msg);
+      } finally {
+        setIsRefreshing(false);
+        setProgressStep(null);
+      }
+    },
+    [loadDashboardData]
+  );
 
   const initializeApp = useCallback(async () => {
     setLoading(true);
@@ -57,53 +85,68 @@ export function App() {
     setProgressStep("Checking today's daily scan status...");
 
     try {
-      const statusRes = await fetchDailyScanStatus();
-      setStatusData(statusRes);
-
-      if (statusRes.already_completed) {
-        // Today's scan already available -> immediately load existing scan results
-        setProgressStep("Today's scan already available. Loading existing results...");
-        const summary = await fetchLatestScan();
-        setData(summary);
-      } else {
-        // Automatically start the daily workflow
-        await executeWorkflow(false);
-      }
+      await loadDashboardData();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to initialize daily scan status.";
+      const msg = err instanceof Error ? err.message : "Today's scan could not be completed.";
       setError(msg);
     } finally {
       setLoading(false);
       setProgressStep(null);
     }
-  }, [executeWorkflow]);
+  }, [loadDashboardData]);
 
   useEffect(() => {
     initializeApp();
   }, [initializeApp]);
 
-  const buyResults = data?.results.filter((r) => r.signal === 'BUY') || [];
+  // Derived counts for summary cards
+  const evaluatedCount = dailyRanking?.evaluated_count ?? (legacyScan?.stocks_scanned ?? (statusData ? 50 : 0));
+  const buyCount = dailyRanking?.buy_signal_count ?? legacyScan?.buy_count ?? statusData?.buy_count ?? 0;
+  const strongCount =
+    dailyRanking?.results.filter(
+      (r) => r.strength === 'VERY_STRONG' || r.strength === 'STRONG'
+    ).length ?? (legacyScan?.buy_count ?? 0);
+  const watchlistCount = watchlistSetups.length;
 
-  // Render standalone Stock Detail view when a stock is selected
-  if (selectedStock) {
-    return (
-      <StockDetailView
-        stock={selectedStock}
-        onBack={() => setSelectedStock(null)}
-      />
-    );
-  }
+  const topSignals: RankedSignal[] = dailyRanking?.shortlist?.length
+    ? dailyRanking.shortlist
+    : dailyRanking?.results?.length
+    ? dailyRanking.results.slice(0, 10)
+    : (legacyScan?.results || []).map((r, idx) => ({
+        rank: idx + 1,
+        symbol: r.symbol,
+        company_name: r.company_name,
+        signal_date: r.signal_date,
+        score: r.signal === 'BUY' ? 1 : 0,
+        strength: r.signal === 'BUY' ? 'STRONG' : 'NO_SIGNAL',
+        tier: r.signal === 'BUY' ? 'STRONG_OPPORTUNITY' : 'WEAK_OR_NO_SIGNAL',
+        buy_count: r.signal === 'BUY' ? 1 : 0,
+        strategies_evaluated: 1,
+        strategies_total: 5,
+        buy_strategies: r.signal === 'BUY' ? [r.strategy_name] : [],
+        hold_strategies: r.signal === 'HOLD' ? [r.strategy_name] : [],
+        error_strategies: r.signal === 'ERROR' ? [r.strategy_name] : [],
+        best_strategy_name: r.strategy_name,
+        best_entry_price: r.entry_price,
+        best_stop_loss: r.stop_loss,
+        best_target_price: r.target_price,
+        best_risk_reward: r.risk_reward,
+      }));
+
+  const scanDate = dailyRanking?.signal_date || legacyScan?.scan_date || statusData?.scan_date || 'Latest';
+  const scanStatus = statusData?.status || (dailyRanking || legacyScan ? 'COMPLETED' : undefined);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased selection:bg-emerald-500/30 selection:text-emerald-200">
       {/* Header */}
       <Header
-        scanDate={data?.scan_date || statusData?.scan_date}
-        universe={data?.universe}
-        strategy={data?.strategy}
-        strategyVersion={data?.strategy_version}
+        scanDate={scanDate}
+        universe={dailyRanking?.universe || legacyScan?.universe || 'NIFTY NEXT 50'}
+        strategy={legacyScan?.strategy}
+        strategyVersion={legacyScan?.strategy_version}
+        scanStatus={scanStatus}
         onRefresh={(force) => executeWorkflow(force)}
-        isAlreadyCompleted={statusData?.already_completed || false}
+        isAlreadyCompleted={statusData?.already_completed || Boolean(dailyRanking || legacyScan)}
         isRefreshing={isRefreshing}
       />
 
@@ -124,8 +167,8 @@ export function App() {
         {loading && (
           <div className="flex flex-col items-center justify-center py-28 text-center my-8 bg-slate-900/40 border border-slate-800/80 rounded-2xl space-y-3 shadow-xl">
             <div className="w-12 h-12 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mb-2" />
-            <h3 className="text-xl font-semibold text-slate-200">{progressStep || "Preparing today's market scan..."}</h3>
-            <p className="text-xs text-slate-400 max-w-md">
+            <h3 className="text-xl font-semibold text-slate-200">{progressStep || "Checking today's daily scan status..."}</h3>
+            <p className="text-xs text-slate-400 max-w-md font-mono">
               Checking SQLite database status for today's completed daily scan run
             </p>
           </div>
@@ -153,31 +196,56 @@ export function App() {
         )}
 
         {/* Dashboard Loaded Data */}
-        {!loading && !error && data && (
+        {!loading && !error && (
           <div className="space-y-8">
-            {/* Summary Cards */}
+            {/* 1. Summary Cards */}
             <SummaryCards
-              buyCount={data.buy_count}
-              watchCount={data.watch_count}
-              holdCount={data.hold_count}
-              skipCount={data.skip_count}
+              evaluatedCount={evaluatedCount}
+              buyCount={buyCount}
+              strongCount={strongCount}
+              watchlistCount={watchlistCount}
+              watchCount={legacyScan?.watch_count ?? 0}
+              holdCount={legacyScan?.hold_count ?? 0}
+              skipCount={legacyScan?.skip_count ?? 0}
             />
 
-            {/* BUY Signals Table */}
-            <BuySignalsTable
-              buyResults={buyResults}
-              onSelectStock={setSelectedStock}
+            {/* 2. Today's Top Setups Table */}
+            <TopSetupsTable
+              signals={topSignals}
+              selectedStrategyFilter={selectedStrategyFilter}
+              onSelectStrategyFilter={setSelectedStrategyFilter}
+              onSelectStock={(sig) => navigate(`/stocks/${sig.symbol}`)}
             />
 
-            {/* All Scanned Stocks Table */}
-            <AllStocksTable
-              results={data.results}
-              onSelectStock={setSelectedStock}
-            />
+            {/* 3. Bottom Two-Column Preview: Watchlist Preview + Strategy Analytics Preview */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <WatchlistPreview
+                setups={watchlistSetups}
+                onSelectStock={(sym) => navigate(`/stocks/${sym}`)}
+                onOpenFullWatchlist={() => navigate('/watchlist')}
+              />
+              <StrategyPerformancePreview
+                strategies={strategyAnalytics?.strategies || []}
+              />
+            </div>
           </div>
         )}
       </main>
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<DashboardView />} />
+        <Route path="/stocks/:symbol" element={<StockDetailView />} />
+        <Route path="/watchlist" element={<WatchlistPage />} />
+        <Route path="/analytics" element={<AnalyticsPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 
