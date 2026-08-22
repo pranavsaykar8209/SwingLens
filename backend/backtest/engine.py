@@ -52,6 +52,7 @@ class BacktestEngine:
 
         # 1. Compute required strategy indicators on each DataFrame
         processed_data: Dict[str, pd.DataFrame] = {}
+        precalculated_signals: Dict[str, List[StrategySignal]] = {}
         for sym, df in data_dict.items():
             if df.empty:
                 continue
@@ -59,6 +60,7 @@ class BacktestEngine:
             if self.strategy.required_indicators:
                 df_sorted = calculate_indicators(df_sorted, self.strategy.required_indicators)
             processed_data[sym] = df_sorted
+            precalculated_signals[sym] = self.strategy.generate_signals(df_sorted)
 
         if not processed_data:
             warnings.append("All provided price DataFrames were empty.")
@@ -199,15 +201,14 @@ class BacktestEngine:
                             holding_period=holding_period,
                         )
 
-            # STEP C: Generate Strategy Signals at CLOSE of Candle N (using df.iloc[:idx+1])
+            # STEP C: Generate Strategy Signals at CLOSE of Candle N
             for sym, df in processed_data.items():
                 if current_date in stock_date_indices[sym]:
                     idx = stock_date_indices[sym][current_date]
-                    # NO LOOK-AHEAD: Pass only slice up to current candle idx
-                    sub_df = df.iloc[: idx + 1]
-                    sig = self.strategy.generate_latest_signal(sub_df)
-                    if sig and sig.signal in [SignalType.BUY, SignalType.SELL]:
-                        pending_signals[sym] = sig
+                    if idx < len(precalculated_signals[sym]):
+                        sig = precalculated_signals[sym][idx]
+                        if sig and sig.signal in [SignalType.BUY, SignalType.SELL]:
+                            pending_signals[sym] = sig
 
             # STEP D: Record Daily Equity State
             portfolio.record_daily_equity(current_date, current_prices)
