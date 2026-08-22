@@ -6,6 +6,11 @@ from pydantic import BaseModel
 import pandas as pd
 
 from backend.aggregator import AggregatedSignalResult, SignalAggregator
+from backend.analytics import (
+    StrategyAnalyticsResponse,
+    StrategyAnalyticsService,
+    StrategyQualityMetrics,
+)
 from backend.backtest import BacktestEngine, BacktestResult
 from backend.database.connection import get_db_connection
 from backend.indicators import calculate_indicators
@@ -411,3 +416,74 @@ def get_stock_history(
         )
 
     return StockHistoryResponse(symbol=symbol_clean, data=data_candles)
+
+
+@app.get("/api/analytics/strategies", response_model=StrategyAnalyticsResponse)
+def get_strategies_analytics(
+    symbols: Optional[str] = Query(
+        default=None,
+        description="Comma-separated stock symbols (defaults to representative stock sample)",
+    ),
+    start_date: Optional[str] = Query(default=None, description="Optional start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(default=None, description="Optional end date (YYYY-MM-DD)"),
+):
+    """
+    Computes empirical historical quality analytics and deterministic classifications
+    across all dynamically discovered strategies in StrategyRegistry.
+    """
+    target_symbols = None
+    if symbols:
+        target_symbols = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+
+    try:
+        service = StrategyAnalyticsService()
+        return service.get_all_strategies_quality(
+            symbols=target_symbols, start_date=start_date, end_date=end_date
+        )
+    except Exception as e:
+        logger.error(f"Error computing strategy analytics: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to calculate strategy analytics: {e}",
+        )
+
+
+@app.get("/api/analytics/strategies/{strategy_name}", response_model=StrategyQualityMetrics)
+def get_single_strategy_analytics(
+    strategy_name: str,
+    symbols: Optional[str] = Query(
+        default=None,
+        description="Comma-separated stock symbols (defaults to representative stock sample)",
+    ),
+    start_date: Optional[str] = Query(default=None, description="Optional start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(default=None, description="Optional end date (YYYY-MM-DD)"),
+):
+    """
+    Computes empirical historical quality analytics, MFE/MAE excursions, outcome rates,
+    and deterministic classification for a specific strategy by name.
+    """
+    target_symbols = None
+    if symbols:
+        target_symbols = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+
+    try:
+        service = StrategyAnalyticsService()
+        return service.get_strategy_quality(
+            strategy_name=strategy_name,
+            symbols=target_symbols,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    except KeyError:
+        registered = [s["name"] for s in list_strategies()]
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown strategy '{strategy_name}'. Registered strategies: {registered}",
+        )
+    except Exception as e:
+        logger.error(f"Error computing analytics for strategy '{strategy_name}': {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to calculate analytics for strategy '{strategy_name}': {e}",
+        )
+
