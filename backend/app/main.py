@@ -10,6 +10,7 @@ from backend.database.connection import get_db_connection
 from backend.indicators import calculate_indicators
 from backend.indicators.engine import get_price_history
 from backend.scanner import MarketScanner, ScanSummary
+from backend.scanner.daily_workflow import get_daily_scan_status, run_daily_scan_workflow
 from backend.strategies.registry import _GLOBAL_REGISTRY, get_strategy, list_strategies
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,19 @@ class StockHistoryCandle(BaseModel):
 class StockHistoryResponse(BaseModel):
     symbol: str
     data: List[StockHistoryCandle]
+
+
+class DailyScanStatusResponse(BaseModel):
+    scan_date: str
+    already_completed: bool
+    status: str
+    latest_market_date: Optional[str] = None
+    last_completed_at: Optional[str] = None
+    buy_count: int = 0
+    watch_count: int = 0
+    hold_count: int = 0
+    skipped_count: int = 0
+    error_message: Optional[str] = None
 
 
 app = FastAPI(
@@ -58,6 +72,42 @@ app.add_middleware(
 def health():
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+@app.get("/api/daily-scan/status", response_model=DailyScanStatusResponse)
+def get_daily_scan_status_endpoint(
+    universe: str = Query(default="NIFTY_NEXT_50", description="Index universe name"),
+    strategy: str = Query(default="ema_pullback", description="Strategy name"),
+):
+    """
+    Determines whether today's daily market scan workflow has completed successfully.
+    """
+    try:
+        status_data = get_daily_scan_status(universe=universe, strategy=strategy)
+        return status_data
+    except Exception as e:
+        logger.error(f"Error checking daily scan status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/daily-scan/run", response_model=ScanSummary)
+def run_daily_scan_endpoint(
+    force: bool = Query(default=False, description="Force re-execution of daily scan workflow"),
+    universe: str = Query(default="NIFTY_NEXT_50", description="Index universe name"),
+    strategy: str = Query(default="ema_pullback", description="Strategy name"),
+):
+    """
+    Executes the daily market scan workflow idempotently.
+    If force=False and today's scan is already COMPLETED, returns existing results immediately.
+    """
+    try:
+        summary = run_daily_scan_workflow(universe=universe, strategy=strategy, force=force)
+        return summary
+    except RuntimeError as rerr:
+        raise HTTPException(status_code=409, detail=str(rerr))
+    except Exception as e:
+        logger.error(f"Error running daily scan workflow: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/scanner/latest", response_model=ScanSummary)

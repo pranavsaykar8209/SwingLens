@@ -161,8 +161,8 @@ export const StockPriceChart: React.FC<StockPriceChartProps> = ({
       </div>
 
       {/* Chart Canvas Container */}
-      <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 shadow-inner">
-        <ResponsiveContainer width="100%" height={340}>
+      <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-4 sm:p-6 shadow-inner">
+        <ResponsiveContainer width="100%" height={420}>
           <ComposedChart data={filteredData} margin={{ top: 15, right: 20, left: 0, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.5} />
             <XAxis

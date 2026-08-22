@@ -2,7 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import App from '../App';
 import * as scannerApi from '../api/scanner';
-import type { ScanResult, ScanSummary } from '../api/scanner';
+import type { ScanResult, ScanSummary, DailyScanStatusResponse } from '../api/scanner';
 import { BuySignalsTable } from '../components/BuySignalsTable';
 import { Header } from '../components/Header';
 import { StockDetailModal } from '../components/StockDetailModal';
@@ -78,29 +78,14 @@ const mockScanSummary: ScanSummary = {
   ],
 };
 
-const mockEmptyBuySummary: ScanSummary = {
-  ...mockScanSummary,
-  buy_count: 0,
-  results: [
-    {
-      symbol: 'ABB',
-      company_name: 'ABB India Ltd.',
-      signal: 'HOLD',
-      signal_date: '2026-08-20',
-      close: 7479.0,
-      entry_price: 7479.0,
-      stop_loss: null,
-      target_price: null,
-      risk_reward: null,
-      score: null,
-      strategy_name: 'EMA Pullback',
-      strategy_version: '1.0',
-      reason: 'Setup conditions not satisfied',
-      metadata: {},
-      error: null,
-      status: 'SUCCESS',
-    },
-  ],
+const mockCompletedStatus: DailyScanStatusResponse = {
+  scan_date: '2026-08-20',
+  already_completed: true,
+  status: 'COMPLETED',
+  buy_count: 2,
+  watch_count: 0,
+  hold_count: 47,
+  skipped_count: 1,
 };
 
 describe('React Daily Market Scanner Dashboard Suite', () => {
@@ -122,7 +107,7 @@ describe('React Daily Market Scanner Dashboard Suite', () => {
     expect(screen.getByText('SwingLens')).toBeInTheDocument();
     expect(screen.getByText('NIFTY_NEXT_50')).toBeInTheDocument();
     expect(screen.getByText('2026-08-20')).toBeInTheDocument();
-    expect(screen.getByText('Refresh Scan')).toBeInTheDocument();
+    expect(screen.getByText("↻ Run Today's Scan")).toBeInTheDocument();
   });
 
   it('2. Renders SummaryCards with accurate metric counts', () => {
@@ -147,7 +132,6 @@ describe('React Daily Market Scanner Dashboard Suite', () => {
   it('4. Renders empty BUY state when no BUY signals exist', () => {
     render(<BuySignalsTable buyResults={[]} onSelectStock={() => {}} />);
     expect(screen.getByText('No BUY setups found today.')).toBeInTheDocument();
-    expect(mockEmptyBuySummary.buy_count).toBe(0);
   });
 
   it('5. Renders StockDetailModal with complete trade parameters and reasons', () => {
@@ -166,7 +150,8 @@ describe('React Daily Market Scanner Dashboard Suite', () => {
     expect(handleClose).toHaveBeenCalledTimes(1);
   });
 
-  it('6. App loads and renders dashboard from API response', async () => {
+  it('6. App loads and renders dashboard from completed status API response', async () => {
+    vi.spyOn(scannerApi, 'fetchDailyScanStatus').mockResolvedValue(mockCompletedStatus);
     vi.spyOn(scannerApi, 'fetchLatestScan').mockResolvedValue(mockScanSummary);
     render(<App />);
 
@@ -178,17 +163,19 @@ describe('React Daily Market Scanner Dashboard Suite', () => {
 
   it('7. App handles API error state with functional Retry button', async () => {
     const fetchSpy = vi
-      .spyOn(scannerApi, 'fetchLatestScan')
+      .spyOn(scannerApi, 'fetchDailyScanStatus')
       .mockRejectedValueOnce(new Error('Network connection failed'));
 
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByText("Unable to load today's scan.")).toBeInTheDocument();
+      expect(screen.getByText("Today's scan could not be completed.")).toBeInTheDocument();
       expect(screen.getByText('Network connection failed')).toBeInTheDocument();
     });
 
-    fetchSpy.mockResolvedValue(mockScanSummary);
+    fetchSpy.mockResolvedValue(mockCompletedStatus);
+    vi.spyOn(scannerApi, 'runDailyScanWorkflow').mockResolvedValue(mockScanSummary);
+    vi.spyOn(scannerApi, 'fetchLatestScan').mockResolvedValue(mockScanSummary);
 
     const retryBtn = screen.getByRole('button', { name: /retry/i });
     fireEvent.click(retryBtn);
@@ -198,9 +185,9 @@ describe('React Daily Market Scanner Dashboard Suite', () => {
     });
   });
 
-  it('8. App displays loading state while fetching API', () => {
-    vi.spyOn(scannerApi, 'fetchLatestScan').mockImplementation(() => new Promise(() => {}));
+  it('8. App displays loading state while fetching API status', () => {
+    vi.spyOn(scannerApi, 'fetchDailyScanStatus').mockImplementation(() => new Promise(() => {}));
     render(<App />);
-    expect(screen.getByText("Loading today's scan...")).toBeInTheDocument();
+    expect(screen.getByText("Checking today's daily scan status...")).toBeInTheDocument();
   });
 });

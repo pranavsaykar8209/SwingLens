@@ -32,6 +32,19 @@ export interface ScanSummary {
   results: ScanResult[];
 }
 
+export interface DailyScanStatusResponse {
+  scan_date: string;
+  already_completed: boolean;
+  status: 'COMPLETED' | 'NOT_RUN' | 'RUNNING' | 'FAILED';
+  latest_market_date?: string | null;
+  last_completed_at?: string | null;
+  buy_count: number;
+  watch_count: number;
+  hold_count: number;
+  skipped_count: number;
+  error_message?: string | null;
+}
+
 export interface BacktestTrade {
   trade_id?: string;
   symbol: string;
@@ -94,6 +107,54 @@ export interface StockHistoryCandle {
 export interface StockHistoryResponse {
   symbol: string;
   data: StockHistoryCandle[];
+}
+
+/**
+ * Fetches daily scan status metadata (whether scan completed today).
+ */
+export async function fetchDailyScanStatus(
+  universe: string = 'NIFTY_NEXT_50',
+  strategy: string = 'ema_pullback'
+): Promise<DailyScanStatusResponse> {
+  const url = `/api/daily-scan/status?universe=${encodeURIComponent(universe)}&strategy=${encodeURIComponent(strategy)}`;
+
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Daily scan status API returned HTTP ${response.status}`);
+  }
+
+  return await response.json();
+}
+
+/**
+ * Executes the daily scan workflow (force=false for idempotent startup check, force=true for manual override).
+ */
+export async function runDailyScanWorkflow(
+  force: boolean = false,
+  universe: string = 'NIFTY_NEXT_50',
+  strategy: string = 'ema_pullback'
+): Promise<ScanSummary> {
+  const url = `/api/daily-scan/run?force=${force}&universe=${encodeURIComponent(universe)}&strategy=${encodeURIComponent(strategy)}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Daily scan workflow API returned HTTP ${response.status}`);
+  }
+
+  return await response.json();
 }
 
 /**

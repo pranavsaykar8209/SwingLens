@@ -76,6 +76,30 @@ def init_db(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> None:
         );
     """)
 
+    # Table: daily_scan_runs
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS daily_scan_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_date DATE NOT NULL,
+            universe TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            status TEXT NOT NULL,
+            started_at DATETIME NOT NULL,
+            completed_at DATETIME,
+            stocks_processed INTEGER DEFAULT 0,
+            stocks_updated INTEGER DEFAULT 0,
+            rows_downloaded INTEGER DEFAULT 0,
+            buy_count INTEGER DEFAULT 0,
+            watch_count INTEGER DEFAULT 0,
+            hold_count INTEGER DEFAULT 0,
+            skipped_count INTEGER DEFAULT 0,
+            error_count INTEGER DEFAULT 0,
+            error_message TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
     # Indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_stocks_symbol ON stocks(symbol);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_stocks_ticker ON stocks(ticker);")
@@ -89,6 +113,9 @@ def init_db(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_index_memberships_valid_from ON index_memberships(valid_from);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_index_memberships_valid_to ON index_memberships(valid_to);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_index_memberships_lookup ON index_memberships(index_name, valid_from, valid_to);")
+
+    # Daily scan runs indexes
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_scan_runs_lookup ON daily_scan_runs(scan_date, universe, strategy, status);")
 
     conn.commit()
     conn.close()
