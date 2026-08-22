@@ -100,6 +100,60 @@ def init_db(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> None:
         );
     """)
 
+    # Table: watchlist_setups. Values are a snapshot of the setup when saved;
+    # they are never recalculated from later strategy runs.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS watchlist_setups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            stock_id INTEGER NOT NULL,
+            signal_date DATE NOT NULL,
+            status TEXT NOT NULL DEFAULT 'ACTIVE'
+                CHECK (status IN ('ACTIVE', 'TRIGGERED', 'EXPIRED', 'CANCELLED')),
+            aggregated_score INTEGER NOT NULL CHECK (aggregated_score BETWEEN 1 AND 5),
+            signal_strength TEXT NOT NULL
+                CHECK (signal_strength IN ('WEAK', 'MODERATE', 'STRONG', 'VERY_STRONG')),
+            buy_strategies TEXT NOT NULL,
+            entry_price REAL NOT NULL CHECK (entry_price > 0),
+            stop_loss REAL NOT NULL CHECK (stop_loss > 0 AND stop_loss < entry_price),
+            target_price REAL NOT NULL CHECK (target_price > entry_price),
+            risk_reward REAL NOT NULL CHECK (risk_reward > 0),
+            best_strategy_name TEXT NOT NULL,
+            outcome TEXT NOT NULL DEFAULT 'PENDING'
+                CHECK (outcome IN ('PENDING', 'ENTRY_REACHED', 'TARGET_HIT', 'STOP_HIT', 'EXPIRED', 'NO_ENTRY', 'AMBIGUOUS')),
+            entry_date DATE,
+            exit_date DATE,
+            exit_price REAL,
+            holding_days INTEGER,
+            mfe REAL,
+            mfe_r REAL,
+            mae REAL,
+            mae_r REAL,
+            realized_r REAL,
+            outcome_checked_at DATETIME,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (stock_id) REFERENCES stocks(id)
+        );
+    """)
+
+    # SQLite supports only limited ALTER TABLE operations. Add fields for
+    # databases created before outcome tracking without changing snapshots.
+    watchlist_columns = {row[1] for row in cursor.execute("PRAGMA table_info(watchlist_setups)")}
+    for column, definition in {
+        "outcome": "TEXT NOT NULL DEFAULT 'PENDING'",
+        "entry_date": "DATE",
+        "exit_date": "DATE",
+        "exit_price": "REAL",
+        "holding_days": "INTEGER",
+        "mfe": "REAL",
+        "mfe_r": "REAL",
+        "mae": "REAL",
+        "mae_r": "REAL",
+        "realized_r": "REAL",
+        "outcome_checked_at": "DATETIME",
+    }.items():
+        if column not in watchlist_columns:
+            cursor.execute(f"ALTER TABLE watchlist_setups ADD COLUMN {column} {definition}")
+
     # Indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_stocks_symbol ON stocks(symbol);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_stocks_ticker ON stocks(ticker);")
@@ -116,6 +170,17 @@ def init_db(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> None:
 
     # Daily scan runs indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_scan_runs_lookup ON daily_scan_runs(scan_date, universe, strategy, status);")
+
+    # Watchlist setup indexes. The partial unique index prevents duplicate
+    # active records while retaining completed setup history.
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_setups_status ON watchlist_setups(status);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_setups_stock_id ON watchlist_setups(stock_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_setups_signal_date ON watchlist_setups(signal_date);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_setups_created_at ON watchlist_setups(created_at);")
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_watchlist_setups_active_stock
+        ON watchlist_setups(stock_id) WHERE status = 'ACTIVE';
+    """)
 
     conn.commit()
     conn.close()

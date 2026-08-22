@@ -11,9 +11,14 @@ from backend.database.connection import get_db_connection
 from backend.indicators import calculate_indicators
 from backend.indicators.engine import get_price_history
 from backend.ranking import DailySignalRanking, DailySignalRanker
+from backend.risk import PositionSizingRequest, PositionSizingResult, calculate_position_size
 from backend.scanner import MarketScanner, ScanSummary
 from backend.scanner.daily_workflow import get_daily_scan_status, run_daily_scan_workflow
 from backend.strategies.registry import _GLOBAL_REGISTRY, get_strategy, list_strategies
+from backend.watchlist import (
+    DuplicateActiveSetupError, InvalidStatusTransitionError, WatchlistNotFoundError,
+    WatchlistOutcomeService, WatchlistService, WatchlistSetup, WatchlistSetupCreate, WatchlistStatus, WatchlistStatusUpdate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +79,57 @@ app.add_middleware(
 def health():
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+@app.post("/api/risk/position-size", response_model=PositionSizingResult)
+def position_size(request: PositionSizingRequest):
+    """Calculate a cash equity BUY quantity from supplied trade parameters.
+
+    Entry, stop, and target values are deliberately supplied by the caller so
+    strategy-specific trade logic remains outside this stateless calculator.
+    """
+    return calculate_position_size(request)
+
+
+@app.post("/api/watchlist", response_model=WatchlistSetup, status_code=201)
+def create_watchlist_setup(setup: WatchlistSetupCreate):
+    try:
+        return WatchlistService().create(setup)
+    except WatchlistNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error))
+    except DuplicateActiveSetupError as error:
+        raise HTTPException(status_code=409, detail=str(error))
+
+
+@app.get("/api/watchlist", response_model=list[WatchlistSetup])
+def list_watchlist_setups(status: WatchlistStatus = Query(default=WatchlistStatus.ACTIVE)):
+    return WatchlistService().list(status)
+
+
+@app.get("/api/watchlist/{setup_id}", response_model=WatchlistSetup)
+def get_watchlist_setup(setup_id: int):
+    try:
+        return WatchlistService().get(setup_id)
+    except WatchlistNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error))
+
+
+@app.patch("/api/watchlist/{setup_id}/status", response_model=WatchlistSetup)
+def update_watchlist_setup_status(setup_id: int, update: WatchlistStatusUpdate):
+    try:
+        return WatchlistService().update_status(setup_id, update.status)
+    except WatchlistNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error))
+    except InvalidStatusTransitionError as error:
+        raise HTTPException(status_code=409, detail=str(error))
+
+
+@app.post("/api/watchlist/{setup_id}/evaluate", response_model=WatchlistSetup)
+def evaluate_watchlist_setup(setup_id: int):
+    try:
+        return WatchlistOutcomeService().evaluate(setup_id)
+    except WatchlistNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error))
 
 
 @app.get("/api/daily-scan/status", response_model=DailyScanStatusResponse)
