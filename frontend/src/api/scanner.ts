@@ -79,6 +79,23 @@ export interface SingleStockBacktestResult {
   warnings?: string[];
 }
 
+export interface StockHistoryCandle {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  ema20?: number | null;
+  ema50?: number | null;
+  ema200?: number | null;
+}
+
+export interface StockHistoryResponse {
+  symbol: string;
+  data: StockHistoryCandle[];
+}
+
 /**
  * Fetches the latest daily market scan results from FastAPI backend.
  */
@@ -101,6 +118,32 @@ export async function fetchLatestScan(
 
   const data: ScanSummary = await response.json();
   return data;
+}
+
+/**
+ * Fetches historical price candles and EMA indicators for a single stock.
+ */
+export async function fetchStockHistory(
+  symbol: string,
+  days?: number
+): Promise<StockHistoryResponse> {
+  let url = `/api/stocks/${encodeURIComponent(symbol)}/history`;
+  if (days && days > 0) {
+    url += `?days=${days}`;
+  }
+
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `History API returned HTTP ${response.status}`);
+  }
+
+  return await response.json();
 }
 
 /**
@@ -129,4 +172,3 @@ export async function fetchSingleStockBacktest(
 
   return await response.json();
 }
-

@@ -3,7 +3,7 @@ import { fetchLatestScan, type ScanResult, type ScanSummary } from './api/scanne
 import { AllStocksTable } from './components/AllStocksTable';
 import { BuySignalsTable } from './components/BuySignalsTable';
 import { Header } from './components/Header';
-import { StockDetailModal } from './components/StockDetailModal';
+import { StockDetailView } from './components/StockDetailView';
 import { SummaryCards } from './components/SummaryCards';
 
 export function App() {
@@ -38,6 +38,16 @@ export function App() {
   }, [loadScan]);
 
   const buyResults = data?.results.filter((r) => r.signal === 'BUY') || [];
+
+  // If a stock is selected, render the dedicated Standalone Stock Detail Page View
+  if (selectedStock) {
+    return (
+      <StockDetailView
+        stock={selectedStock}
+        onBack={() => setSelectedStock(null)}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased selection:bg-emerald-500/30 selection:text-emerald-200">
@@ -106,14 +116,9 @@ export function App() {
           </div>
         )}
       </main>
-
-      {/* Stock Detail Modal */}
-      <StockDetailModal
-        stock={selectedStock}
-        onClose={() => setSelectedStock(null)}
-      />
     </div>
   );
 }
 
 export default App;
+

@@ -161,8 +161,8 @@ describe('React Daily Market Scanner Dashboard Suite', () => {
     expect(screen.getByText('2:1')).toBeInTheDocument();
     expect(screen.getByText('EMA20 > EMA50 > EMA200 pullback confirmed')).toBeInTheDocument();
 
-    const closeButton = screen.getByRole('button', { name: /close/i });
-    fireEvent.click(closeButton);
+    const backButton = screen.getByText('Back to Scanner Dashboard');
+    fireEvent.click(backButton);
     expect(handleClose).toHaveBeenCalledTimes(1);
   });
 

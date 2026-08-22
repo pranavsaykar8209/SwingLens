@@ -1,14 +1,36 @@
 import logging
+from typing import List, Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import pandas as pd
 
 from backend.backtest import BacktestEngine, BacktestResult
 from backend.database.connection import get_db_connection
+from backend.indicators import calculate_indicators
 from backend.indicators.engine import get_price_history
 from backend.scanner import MarketScanner, ScanSummary
 from backend.strategies.registry import _GLOBAL_REGISTRY, get_strategy, list_strategies
 
 logger = logging.getLogger(__name__)
+
+
+class StockHistoryCandle(BaseModel):
+    date: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
+    ema20: Optional[float] = None
+    ema50: Optional[float] = None
+    ema200: Optional[float] = None
+
+
+class StockHistoryResponse(BaseModel):
+    symbol: str
+    data: List[StockHistoryCandle]
+
 
 app = FastAPI(
     title="SwingLens API",
@@ -117,3 +139,64 @@ def backtest_single_stock(
     result = engine.run(df)
     return result
 
+
+@app.get("/api/stocks/{symbol}/history", response_model=StockHistoryResponse)
+def get_stock_history(
+    symbol: str,
+    days: Optional[int] = Query(default=None, description="Number of recent trading sessions to return (e.g. 250)"),
+):
+    """
+    Retrieves historical daily price candles for the specified stock along with EMA20, EMA50, and EMA200 values.
+    Queries ONLY local SQLite daily_prices and calculates indicators in-memory without mutating the database.
+    """
+    symbol_clean = symbol.strip().upper()
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM stocks WHERE symbol = ?", (symbol_clean,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Stock symbol '{symbol_clean}' not found in database.",
+            )
+
+        df = get_price_history(conn, symbol_clean)
+    finally:
+        conn.close()
+
+    if df.empty:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No price history found for symbol '{symbol_clean}' in database.",
+        )
+
+    # Compute indicators over full dataset for indicator calculation accuracy
+    df = calculate_indicators(df, ["ema_20", "ema_50", "ema_200"])
+
+    if days and days > 0:
+        df_slice = df.tail(days).reset_index(drop=True)
+    else:
+        df_slice = df
+
+    data_candles: List[StockHistoryCandle] = []
+    for _, r in df_slice.iterrows():
+        ema20_val = round(float(r["ema_20"]), 2) if "ema_20" in r and pd.notna(r["ema_20"]) else None
+        ema50_val = round(float(r["ema_50"]), 2) if "ema_50" in r and pd.notna(r["ema_50"]) else None
+        ema200_val = round(float(r["ema_200"]), 2) if "ema_200" in r and pd.notna(r["ema_200"]) else None
+
+        data_candles.append(
+            StockHistoryCandle(
+                date=str(r["trade_date"]),
+                open=round(float(r["open"]), 2),
+                high=round(float(r["high"]), 2),
+                low=round(float(r["low"]), 2),
+                close=round(float(r["close"]), 2),
+                volume=int(r["volume"]),
+                ema20=ema20_val,
+                ema50=ema50_val,
+                ema200=ema200_val,
+            )
+        )
+
+    return StockHistoryResponse(symbol=symbol_clean, data=data_candles)
