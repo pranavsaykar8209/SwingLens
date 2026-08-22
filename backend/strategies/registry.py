@@ -12,8 +12,9 @@ def _normalize_name(name: str) -> str:
     """Normalizes strategy name key to lowercase stripped string without version suffixes."""
     clean = name.lower().strip()
     clean = re.sub(r"\s+v\d+(\.\d+)*$", "", clean)
-    clean = clean.replace(" ", "_")
+    clean = clean.replace("-", "_").replace(" ", "_")
     return clean
+
 
 
 
