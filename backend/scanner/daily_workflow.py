@@ -84,6 +84,30 @@ def get_daily_scan_status(
                 "error_message": None,
             }
 
+        # Check daily_scan_runs for completed run
+        cursor.execute(
+            """
+            SELECT * FROM daily_scan_runs
+            WHERE scan_date = ? AND universe = ? AND status = 'COMPLETED'
+            ORDER BY id DESC LIMIT 1;
+            """,
+            (target_date, universe),
+        )
+        completed_row = cursor.fetchone()
+        if completed_row:
+            return {
+                "scan_date": completed_row["scan_date"],
+                "already_completed": True,
+                "status": "COMPLETED",
+                "latest_market_date": target_date,
+                "last_completed_at": completed_row["completed_at"],
+                "buy_count": completed_row["buy_count"],
+                "watch_count": completed_row["watch_count"],
+                "hold_count": completed_row["hold_count"],
+                "skipped_count": completed_row["skipped_count"],
+                "error_message": None,
+            }
+
         # Check if there is an in-progress scan
         cursor.execute(
             """
@@ -188,13 +212,13 @@ def run_daily_scan_workflow(
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT COUNT(id) FROM daily_scan_results
-                WHERE scan_date = ?;
+                SELECT id FROM daily_scan_runs
+                WHERE scan_date = ? AND universe = ? AND status = 'COMPLETED'
+                ORDER BY id DESC LIMIT 1;
                 """,
-                (target_date,),
+                (target_date, universe),
             )
-            res_count = cursor.fetchone()[0]
-            if res_count > 0:
+            if cursor.fetchone():
                 conn.close()
                 scanner = MarketScanner()
                 return scanner.scan_summary(index_name=universe, strategy_name=strategy, db_path=db_path)

@@ -195,3 +195,36 @@ export async function fetchSingleStockBacktest(
   if (endDate) url += `&end_date=${encodeURIComponent(endDate)}`;
   return apiGet<SingleStockBacktestResult>(url);
 }
+
+/**
+ * Fetches on-demand single-stock backtest results from FastAPI backend.
+ */
+export const AVAILABLE_STRATEGIES = [
+  { key: 'ema_pullback', name: 'EMA Pullback', version: '1.0' },
+  { key: 'ma_trend_breakout', name: 'MA Trend Breakout', version: '1.0' },
+  { key: 'rsi_mean_reversion', name: 'RSI Mean-Reversion', version: '1.0' },
+  { key: 'macd_momentum', name: 'MACD Momentum', version: '1.0' },
+  { key: 'bollinger_squeeze', name: 'Bollinger Squeeze', version: '1.0' },
+];
+
+/**
+ * Runs single-stock backtest across all 5 strategies concurrently.
+ */
+export async function fetchAllStrategiesBacktest(
+  symbol: string,
+  startDate?: string,
+  endDate?: string
+): Promise<Record<string, SingleStockBacktestResult>> {
+  const results: Record<string, SingleStockBacktestResult> = {};
+  await Promise.all(
+    AVAILABLE_STRATEGIES.map(async (strat) => {
+      try {
+        const res = await fetchSingleStockBacktest(symbol, strat.key, startDate, endDate);
+        results[strat.key] = res;
+      } catch (err) {
+        console.error(`Backtest for ${strat.name} failed:`, err);
+      }
+    })
+  );
+  return results;
+}

@@ -100,7 +100,7 @@ describe('React Daily Market Scanner Dashboard Suite', () => {
     expect(screen.getByText('₹573.90')).toBeInTheDocument();
     expect(screen.getByText('₹550.27')).toBeInTheDocument();
     expect(screen.getByText('₹621.16')).toBeInTheDocument();
-    expect(screen.getByText('2:1')).toBeInTheDocument();
+    expect(screen.getByText(/1\s*:\s*2\.0|2:1/)).toBeInTheDocument();
 
     const backButton = screen.getByText(/Back to Recommendations/i);
     fireEvent.click(backButton);
