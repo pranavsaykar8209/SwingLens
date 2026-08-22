@@ -59,6 +59,15 @@ export interface DailyScanStatusResponse {
   error_message?: string | null;
 }
 
+export interface HistoricalScanSummary {
+  scan_date: string;
+  status: string;
+  stocks_evaluated: number;
+  buy_setups: number;
+  strong_signals: number;
+  completed_at?: string | null;
+}
+
 export interface RankedSignal {
   rank: number;
   symbol: string;

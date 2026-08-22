@@ -6,6 +6,7 @@ import type {
   AggregatedSignalResult,
   DailyScanStatusResponse,
   DailySignalRanking,
+  HistoricalScanSummary,
   ScanSummary,
   SingleStockBacktestResult,
   StockHistoryResponse,
@@ -17,6 +18,10 @@ export * from './types';
 
 // In-flight promise map for deduplication of concurrent identical GET requests
 const inFlightRequests = new Map<string, Promise<any>>();
+
+export function resetApiCache(): void {
+  inFlightRequests.clear();
+}
 
 async function apiGet<T>(url: string): Promise<T> {
   if (inFlightRequests.has(url)) {
@@ -94,13 +99,36 @@ export async function fetchLatestScan(
 }
 
 /**
- * Fetches today's multi-strategy daily signal ranking and top setups.
+ * Fetches today's multi-strategy daily signal ranking and top setups (read-only from SQLite).
  */
 export async function fetchDailySignals(
-  limit: number = 10,
+  limit: number = 50,
   index: string = 'NIFTY_NEXT_50'
 ): Promise<DailySignalRanking> {
   const url = `/api/daily-signals?index=${encodeURIComponent(index)}&limit=${limit}`;
+  return apiGet<DailySignalRanking>(url);
+}
+
+/**
+ * Fetches list of historical daily scan run summaries (read-only).
+ */
+export async function fetchDailyScanHistory(limit: number = 100): Promise<HistoricalScanSummary[]> {
+  const url = `/api/daily-signals/history?limit=${limit}`;
+  return apiGet<HistoricalScanSummary[]>(url);
+}
+
+/**
+ * Fetches persisted multi-strategy ranking snapshot for a specific historical date.
+ */
+export async function fetchHistoricalDailySignals(
+  scanDate: string,
+  limit?: number,
+  index: string = 'NIFTY_NEXT_50'
+): Promise<DailySignalRanking> {
+  let url = `/api/daily-signals/${encodeURIComponent(scanDate)}?index=${encodeURIComponent(index)}`;
+  if (limit) {
+    url += `&limit=${limit}`;
+  }
   return apiGet<DailySignalRanking>(url);
 }
 

@@ -306,6 +306,21 @@ def aggregate_signals_for_symbol(
         )
 
 
+from backend.ranking.storage import (
+    get_persisted_daily_ranking,
+    get_historical_scan_summaries,
+)
+
+
+class HistoricalScanSummaryItem(BaseModel):
+    scan_date: str
+    status: str
+    stocks_evaluated: int
+    buy_setups: int
+    strong_signals: int
+    completed_at: Optional[str] = None
+
+
 @app.get("/api/daily-signals", response_model=DailySignalRanking)
 def get_daily_signals(
     index: str = Query(default="NIFTY_NEXT_50", description="Active index universe name"),
@@ -318,25 +333,8 @@ def get_daily_signals(
     ),
 ):
     """
-    Ranks today's active NIFTY Next 50 stocks by multi-strategy signal agreement.
-
-    For each active constituent, all 5 production strategies are run independently
-    and their signals are combined by the existing SignalAggregator (BUY=1 point,
-    other signals=0 points, no weights, no ML).
-
-    Ranking priority (deterministic):
-      1. Score (raw BUY count) — descending
-      2. BUY count            — descending (tie-break)
-      3. Best Risk/Reward     — descending (tie-break)
-      4. Symbol               — ascending (final deterministic tie-breaker)
-
-    Signal tiers:
-      STRONG_OPPORTUNITY   — VERY_STRONG or STRONG (4–5 strategies agree)
-      MODERATE_OPPORTUNITY — MODERATE (3 strategies agree)
-      WEAK_OR_NO_SIGNAL    — WEAK or NO_SIGNAL (0–2 strategies agree)
-
-    One stock failing does not cause the entire response to fail.
-    Failed stocks are counted in 'excluded_count'.
+    Read-only endpoint: Retrieves the latest persisted daily multi-strategy scan ranking from SQLite.
+    Never computes indicators or executes strategies on request.
     """
     if limit is not None and not (1 <= limit <= 200):
         raise HTTPException(
@@ -344,16 +342,62 @@ def get_daily_signals(
             detail=f"limit must be between 1 and 200, got {limit}.",
         )
 
+    conn = get_db_connection()
     try:
-        ranker = DailySignalRanker()
-        ranking = ranker.run(index_name=index, limit=limit)
+        ranking = get_persisted_daily_ranking(conn, scan_date=None, limit=limit, universe=index)
+        if not ranking:
+            raise HTTPException(
+                status_code=404,
+                detail="No persisted daily scan results found. Run today's scan workflow to evaluate setups.",
+            )
         return ranking
-    except Exception as e:
-        logger.error(f"Error running daily signal ranking: {e}", exc_info=True)
+    finally:
+        conn.close()
+
+
+@app.get("/api/daily-signals/history", response_model=List[HistoricalScanSummaryItem])
+def get_daily_signals_history(
+    limit: int = Query(default=100, ge=1, le=500, description="Max historical scan records to return"),
+):
+    """
+    Returns available historical daily market scans, ordered newest first.
+    Read-only from SQLite.
+    """
+    conn = get_db_connection()
+    try:
+        history = get_historical_scan_summaries(conn, limit=limit)
+        return history
+    finally:
+        conn.close()
+
+
+@app.get("/api/daily-signals/{scan_date}", response_model=DailySignalRanking)
+def get_daily_signals_by_date(
+    scan_date: str,
+    index: str = Query(default="NIFTY_NEXT_50", description="Active index universe name"),
+    limit: Optional[int] = Query(default=None, description="Optional top-N shortlist size"),
+):
+    """
+    Returns the immutable, persisted multi-strategy ranking snapshot for a specific historical date.
+    Never recalculates strategies using today's data.
+    """
+    if limit is not None and not (1 <= limit <= 200):
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to compute daily signal ranking: {e}",
+            status_code=422,
+            detail=f"limit must be between 1 and 200, got {limit}.",
         )
+
+    conn = get_db_connection()
+    try:
+        ranking = get_persisted_daily_ranking(conn, scan_date=scan_date, limit=limit, universe=index)
+        if not ranking:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No persisted scan results found for date '{scan_date}'.",
+            )
+        return ranking
+    finally:
+        conn.close()
 
 
 @app.get("/api/stocks/{symbol}/history", response_model=StockHistoryResponse)

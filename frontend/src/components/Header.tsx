@@ -53,6 +53,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const navLinks = [
     { to: '/', label: 'Recommendations' },
+    { to: '/scan-history', label: 'Scan History' },
     { to: '/watchlist', label: 'Watchlist' },
     { to: '/analytics', label: 'Strategy Analytics' },
   ];

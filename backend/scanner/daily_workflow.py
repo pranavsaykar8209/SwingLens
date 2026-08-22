@@ -6,6 +6,8 @@ from typing import Any, Dict, Optional
 
 from backend.database.connection import DEFAULT_DB_PATH, get_db_connection, init_db
 from backend.market_data.validator import validate_ohlcv_dataframe
+from backend.ranking.ranker import DailySignalRanker
+from backend.ranking.storage import persist_daily_scan_ranking
 from backend.scanner import MarketScanner, ScanSummary
 from backend.scripts.update_market_data import run_market_data_update
 
@@ -32,7 +34,7 @@ def get_daily_scan_status(
 ) -> Dict[str, Any]:
     """
     Determines whether today's daily market scan workflow has completed successfully.
-    Queries `daily_scan_runs` table for status records.
+    Queries `daily_scan_runs` and `daily_scan_results` tables for status records.
     """
     # Ensure database schema is initialized
     init_db(db_path)
@@ -44,27 +46,41 @@ def get_daily_scan_status(
         target_date = latest_date or today_str
 
         cursor = conn.cursor()
+
+        # Check if daily_scan_results already has completed results for this target date
         cursor.execute(
             """
-            SELECT * FROM daily_scan_runs
-            WHERE scan_date = ? AND universe = ? AND strategy = ? AND status = 'COMPLETED'
-            ORDER BY id DESC LIMIT 1;
+            SELECT COUNT(id) as result_count,
+                   SUM(CASE WHEN buy_count > 0 THEN 1 ELSE 0 END) as buy_count
+            FROM daily_scan_results
+            WHERE scan_date = ?;
             """,
-            (target_date, universe, strategy),
+            (target_date,),
         )
-        completed_row = cursor.fetchone()
+        res_row = cursor.fetchone()
+        # If daily_scan_results has rows for this date, the multi-strategy ranking snapshot is ready.
+        if res_row and res_row["result_count"] > 0:
+            cursor.execute(
+                """
+                SELECT completed_at FROM daily_scan_runs
+                WHERE scan_date = ? AND status = 'COMPLETED'
+                ORDER BY id DESC LIMIT 1;
+                """,
+                (target_date,),
+            )
+            run_row = cursor.fetchone()
+            completed_at = run_row["completed_at"] if run_row else None
 
-        if completed_row:
             return {
-                "scan_date": completed_row["scan_date"],
+                "scan_date": target_date,
                 "already_completed": True,
                 "status": "COMPLETED",
                 "latest_market_date": target_date,
-                "last_completed_at": completed_row["completed_at"],
-                "buy_count": completed_row["buy_count"],
-                "watch_count": completed_row["watch_count"],
-                "hold_count": completed_row["hold_count"],
-                "skipped_count": completed_row["skipped_count"],
+                "last_completed_at": completed_at,
+                "buy_count": res_row["buy_count"] or 0,
+                "watch_count": 0,
+                "hold_count": res_row["result_count"] - (res_row["buy_count"] or 0),
+                "skipped_count": 0,
                 "error_message": None,
             }
 
@@ -72,10 +88,10 @@ def get_daily_scan_status(
         cursor.execute(
             """
             SELECT * FROM daily_scan_runs
-            WHERE scan_date = ? AND universe = ? AND strategy = ? AND status = 'RUNNING'
+            WHERE scan_date = ? AND universe = ? AND status = 'RUNNING'
             ORDER BY id DESC LIMIT 1;
             """,
-            (target_date, universe, strategy),
+            (target_date, universe),
         )
         running_row = cursor.fetchone()
         if running_row or _SCAN_WORKFLOW_LOCK.locked():
@@ -96,10 +112,10 @@ def get_daily_scan_status(
         cursor.execute(
             """
             SELECT * FROM daily_scan_runs
-            WHERE scan_date = ? AND universe = ? AND strategy = ? AND status = 'FAILED'
+            WHERE scan_date = ? AND universe = ? AND status = 'FAILED'
             ORDER BY id DESC LIMIT 1;
             """,
-            (target_date, universe, strategy),
+            (target_date, universe),
         )
         failed_row = cursor.fetchone()
         if failed_row:
@@ -143,7 +159,7 @@ def run_daily_scan_workflow(
     1. If force=False and today's scan is COMPLETED, returns existing results immediately.
     2. Uses thread lock to prevent concurrent scan executions.
     3. Executes incremental market data update & data validation.
-    4. Runs strategy scanner over universe.
+    4. Runs multi-strategy ranker across universe and persists snapshots to daily_scan_results.
     5. Records COMPLETED or FAILED in daily_scan_runs.
     """
     init_db(db_path)
@@ -152,7 +168,7 @@ def run_daily_scan_workflow(
         status_info = get_daily_scan_status(universe=universe, strategy=strategy, db_path=db_path)
         if status_info["already_completed"]:
             logger.info(
-                f"Daily scan for {universe}/{strategy} already completed on {status_info['scan_date']}. Returning existing results."
+                f"Daily scan for {universe} already completed on {status_info['scan_date']}. Returning existing results."
             )
             scanner = MarketScanner()
             return scanner.scan_summary(index_name=universe, strategy_name=strategy, db_path=db_path)
@@ -172,13 +188,13 @@ def run_daily_scan_workflow(
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT id FROM daily_scan_runs
-                WHERE scan_date = ? AND universe = ? AND strategy = ? AND status = 'COMPLETED'
-                ORDER BY id DESC LIMIT 1;
+                SELECT COUNT(id) FROM daily_scan_results
+                WHERE scan_date = ?;
                 """,
-                (target_date, universe, strategy),
+                (target_date,),
             )
-            if cursor.fetchone():
+            res_count = cursor.fetchone()[0]
+            if res_count > 0:
                 conn.close()
                 scanner = MarketScanner()
                 return scanner.scan_summary(index_name=universe, strategy_name=strategy, db_path=db_path)
@@ -195,25 +211,30 @@ def run_daily_scan_workflow(
         )
         run_id = cursor.lastrowid
         conn.commit()
-        conn.close()
 
-        # Step 1: Incremental market data update (never re-downloads 5 years)
+        # Step 1: Incremental market data update (never re-downloads full history)
         logger.info(f"Executing incremental market data update for {universe}...")
         run_market_data_update(db_path=db_path)
 
         # Step 2: Data Validation completed during update
         logger.info(f"Incremental data update and validation complete for {universe}.")
 
-        # Step 3: Market Scanner Execution
+        # Step 3: Run Multi-Strategy Daily Signal Ranker over the entire universe
+        logger.info(f"Executing multi-strategy daily ranking pipeline for {universe}...")
+        ranker = DailySignalRanker()
+        ranking = ranker.run(index_name=universe, db_path=db_path, conn=conn)
+
+        # Step 4: Persist all ranked multi-strategy signals into daily_scan_results
+        persist_daily_scan_ranking(conn, ranking, scan_run_id=run_id)
+
+        # Step 5: Market Scanner Execution (for legacy scan summary model)
         scanner = MarketScanner()
         summary = scanner.scan_summary(index_name=universe, strategy_name=strategy, db_path=db_path)
 
-        # Step 4: Record COMPLETED status in database
-        conn = get_db_connection(db_path)
+        # Step 6: Record COMPLETED status in daily_scan_runs
         completed_at = datetime.now().isoformat()
-        actual_scan_date = summary.scan_date or target_date
+        actual_scan_date = ranking.signal_date or summary.scan_date or target_date
 
-        cursor = conn.cursor()
         cursor.execute(
             """
             UPDATE daily_scan_runs
@@ -232,11 +253,11 @@ def run_daily_scan_workflow(
             (
                 actual_scan_date,
                 completed_at,
-                summary.stocks_scanned,
-                summary.buy_count,
+                ranking.evaluated_count,
+                ranking.buy_signal_count,
                 summary.watch_count,
-                summary.hold_count,
-                summary.skip_count,
+                ranking.evaluated_count - ranking.buy_signal_count,
+                ranking.excluded_count,
                 0,
                 run_id,
             ),

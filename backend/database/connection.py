@@ -1,16 +1,19 @@
 import os
 import sqlite3
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 DEFAULT_DB_PATH = Path("data/swinglens.db")
 
 
-def get_db_connection(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> sqlite3.Connection:
+def get_db_connection(db_path: Optional[Union[str, Path]] = None) -> sqlite3.Connection:
     """
     Establishes and returns a connection to the SQLite database.
     Ensures foreign keys are enabled.
     """
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
+
     db_path_obj = Path(db_path)
     if str(db_path) != ":memory:":
         db_path_obj.parent.mkdir(parents=True, exist_ok=True)
@@ -21,11 +24,14 @@ def get_db_connection(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> sqlite3.Co
     return conn
 
 
-def init_db(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> None:
+def init_db(db_path: Optional[Union[str, Path]] = None) -> None:
     """
     Initializes the database schema including `stocks`, `daily_prices`, and `index_memberships`
     tables and their required indexes.
     """
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
+
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
 
@@ -154,6 +160,36 @@ def init_db(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> None:
         if column not in watchlist_columns:
             cursor.execute(f"ALTER TABLE watchlist_setups ADD COLUMN {column} {definition}")
 
+    # Table: daily_scan_results. Immutable persisted snapshots of daily multi-strategy rankings.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS daily_scan_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scan_run_id INTEGER,
+            scan_date DATE NOT NULL,
+            stock_id INTEGER NOT NULL,
+            symbol TEXT NOT NULL,
+            rank INTEGER NOT NULL,
+            score INTEGER NOT NULL,
+            strength TEXT NOT NULL,
+            tier TEXT NOT NULL,
+            buy_count INTEGER NOT NULL,
+            strategies_evaluated INTEGER NOT NULL,
+            strategies_total INTEGER NOT NULL DEFAULT 5,
+            buy_strategies TEXT NOT NULL DEFAULT '[]',
+            hold_strategies TEXT NOT NULL DEFAULT '[]',
+            error_strategies TEXT NOT NULL DEFAULT '[]',
+            best_strategy_name TEXT,
+            entry_price REAL,
+            stop_loss REAL,
+            target_price REAL,
+            risk_reward REAL,
+            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (scan_run_id) REFERENCES daily_scan_runs(id),
+            FOREIGN KEY (stock_id) REFERENCES stocks(id),
+            UNIQUE(scan_date, stock_id)
+        );
+    """)
+
     # Indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_stocks_symbol ON stocks(symbol);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_stocks_ticker ON stocks(ticker);")
@@ -170,6 +206,13 @@ def init_db(db_path: Union[str, Path] = DEFAULT_DB_PATH) -> None:
 
     # Daily scan runs indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_scan_runs_lookup ON daily_scan_runs(scan_date, universe, strategy, status);")
+
+    # Daily scan results indexes
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_scan_results_date ON daily_scan_results(scan_date);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_scan_results_run ON daily_scan_results(scan_run_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_scan_results_stock ON daily_scan_results(stock_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_scan_results_symbol ON daily_scan_results(symbol);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_daily_scan_results_date_rank ON daily_scan_results(scan_date, rank);")
 
     # Watchlist setup indexes. The partial unique index prevents duplicate
     # active records while retaining completed setup history.
