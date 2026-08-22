@@ -3,7 +3,9 @@ from .ema import calculate_ema, calculate_sma
 from .rsi import calculate_rsi
 from .atr import calculate_tr, calculate_atr
 from .volume import calculate_volume_sma, calculate_relative_volume
+from .macd import calculate_macd
 from .price_action import (
+
     percentage_change,
     daily_return,
     distance_from_ema_pct,
@@ -39,6 +41,8 @@ __all__ = [
     "price_above_ema",
     "crossed_above",
     "crossed_below",
+    "calculate_macd",
     "get_price_history",
+
     "calculate_indicators",
 ]

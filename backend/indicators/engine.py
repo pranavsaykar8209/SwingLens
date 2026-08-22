@@ -6,7 +6,9 @@ import pandas as pd
 from backend.database.connection import get_db_connection, DEFAULT_DB_PATH
 from .atr import calculate_atr, calculate_tr
 from .ema import calculate_ema, calculate_sma
+from .macd import calculate_macd
 from .price_action import (
+
     distance_from_ema_pct,
     highest_high,
     lowest_low,
@@ -158,5 +160,16 @@ def calculate_indicators(df: pd.DataFrame, indicators: List[str]) -> pd.DataFram
             period = int(match_ll.group(1))
             res_df[ind] = lowest_low(low, period)
             continue
+
+        # 12. MACD: macd, macd_signal, macd_histogram / macd_hist
+        if ind_clean in ["macd", "macd_signal", "macd_histogram", "macd_hist"] and close is not None:
+            if "macd" not in res_df.columns or "macd_signal" not in res_df.columns or "macd_histogram" not in res_df.columns:
+                m_line, s_line, h_line = calculate_macd(close, 12, 26, 9)
+                res_df["macd"] = m_line
+                res_df["macd_signal"] = s_line
+                res_df["macd_histogram"] = h_line
+                res_df["macd_hist"] = h_line
+            continue
+
 
     return res_df

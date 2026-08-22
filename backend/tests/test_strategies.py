@@ -159,14 +159,16 @@ def test_get_strategy_by_name():
 def test_list_strategies():
     strats = list_strategies()
     assert isinstance(strats, list)
-    assert len(strats) >= 3
+    assert len(strats) >= 4
     names = [s["name"] for s in strats]
     assert "EMA Pullback" in names
     assert "MA Trend Breakout" in names
     assert "RSI Mean-Reversion" in names
+    assert "MACD Momentum" in names
     for s in strats:
         assert "name" in s
         assert "version" in s
+
 
 
 
